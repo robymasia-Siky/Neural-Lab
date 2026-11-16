@@ -181,7 +181,9 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
         g.strokePath(refPath, juce::PathStrokeType(2.2f));
         g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
         g.drawText("REF TARGET EQ CURVE", static_cast<int>(screenArea.getRight()) - 150, static_cast<int>(screenArea.getY()) + 6, 140, 14, juce::Justification::centredRight);
-    // AI Copilot Chat Response Feed (parte bassa di screenArea)
+    }
+
+    // AI Copilot Chat Response Feed (sempre visibile nella parte bassa di screenArea)
     {
         auto chatBox = screenArea.toNearestInt().withTrimmedTop(screenArea.toNearestInt().getHeight() - 56).reduced(8, 4);
         g.setColour(juce::Colour::fromFloatRGBA(0.03f, 0.05f, 0.08f, 0.88f));
