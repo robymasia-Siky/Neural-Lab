@@ -2,15 +2,8 @@ import os
 import json
 import subprocess
 import torch
-from torch.utils.data import Dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    BitsAndBytesConfig,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForSeq2Seq
-)
+from torch.utils.data import Dataset, DataLoader
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, get_cosine_schedule_with_warmup
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -39,8 +32,7 @@ class StudioJsonDataset(Dataset):
                     max_length=max_length,
                     padding=False
                 )
-                enc["labels"] = enc["input_ids"].copy()
-                self.samples.append(enc)
+                self.samples.append(enc["input_ids"])
 
     def __len__(self):
         return len(self.samples)
@@ -48,9 +40,24 @@ class StudioJsonDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]
 
+def collate_batch(batch, pad_id: int):
+    max_len = max(len(x) for x in batch)
+    input_ids, attention_mask, labels = [], [], []
+    for seq in batch:
+        pad_len = max_len - len(seq)
+        input_ids.append(seq + [pad_id] * pad_len)
+        attention_mask.append([1] * len(seq) + [0] * pad_len)
+        labels.append(seq + [-100] * pad_len)
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
+
 def run_qlora_training():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
-    print(f"[QLoRA] CUDA Available: {torch.cuda.is_available()} | Device: {gpu_name}", flush=True)
+    print(f"[QLoRA] Device: {gpu_name}", flush=True)
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -81,43 +88,63 @@ def run_qlora_training():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    train_dataset = StudioJsonDataset(DATASET_PATH, tokenizer, max_length=384)
-    print(f"[QLoRA] Loaded {len(train_dataset)} tokenized studio examples.", flush=True)
-
-    training_args = TrainingArguments(
-        output_dir="training/checkpoints",
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        num_train_epochs=2,
-        fp16=True,
-        logging_steps=25,
-        save_strategy="no",
-        optim="paged_adamw_8bit",
-        report_to="none"
+    dataset = StudioJsonDataset(DATASET_PATH, tokenizer, max_length=384)
+    batch_size = 8
+    grad_accum = 2
+    epochs = 2
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=lambda b: collate_batch(b, tokenizer.pad_token_id)
     )
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True)
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
+    total_steps = (len(loader) // grad_accum) * epochs
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=20, num_training_steps=total_steps)
+    scaler = torch.amp.GradScaler("cuda", enabled=torch.cuda.is_available())
 
-    print("[QLoRA] Starting 4-bit fine-tuning on GPU...", flush=True)
-    trainer.train()
+    print(f"[QLoRA] Training on {len(dataset)} examples ({epochs} epochs, {total_steps} optimizer steps)...", flush=True)
+    model.train()
+    global_step = 0
+    running_loss = 0.0
 
+    for epoch in range(1, epochs + 1):
+        optimizer.zero_grad()
+        for step, batch in enumerate(loader, 1):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=torch.cuda.is_available()):
+                outputs = model(**batch)
+                loss = outputs.loss / grad_accum
+
+            scaler.scale(loss).backward()
+            running_loss += loss.item() * grad_accum
+
+            if step % grad_accum == 0 or step == len(loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                scheduler.step()
+                global_step += 1
+
+                if global_step % 25 == 0 or global_step == total_steps:
+                    avg_loss = running_loss / 25.0 if global_step % 25 == 0 else running_loss / max(1, (global_step % 25))
+                    print(f"Epoch {epoch}/{epochs} | Step {global_step}/{total_steps} | Loss: {avg_loss:.4f}", flush=True)
+                    running_loss = 0.0
+
+    os.makedirs(ADAPTER_DIR, exist_ok=True)
     model.save_pretrained(ADAPTER_DIR)
     tokenizer.save_pretrained(ADAPTER_DIR)
     print(f"[QLoRA] LoRA adapter saved to {ADAPTER_DIR}", flush=True)
 
-    print("[EXPORT] Merging LoRA weights into standalone 0.5B model...", flush=True)
-    del model
+    print("[EXPORT] Merging LoRA weights into standalone FP16 0.5B model...", flush=True)
+    del model, optimizer, scaler
     torch.cuda.empty_cache()
 
     base_fp16 = AutoModelForCausalLM.from_pretrained(BASE_MODEL, torch_dtype=torch.float16, device_map="cpu")
     merged = PeftModel.from_pretrained(base_fp16, ADAPTER_DIR)
     merged = merged.merge_and_unload()
+    os.makedirs(MERGED_DIR, exist_ok=True)
     merged.save_pretrained(MERGED_DIR, safe_serialization=True)
     tokenizer.save_pretrained(MERGED_DIR)
 
