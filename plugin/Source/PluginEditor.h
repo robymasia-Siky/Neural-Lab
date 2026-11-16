@@ -21,6 +21,7 @@ private:
     juce::TextEditor promptInput;
     juce::TextButton generateTrackBtn { "GENERATE TRACK" };
     juce::TextButton arrangeFullBtn   { "ARRANGE FULL" };
+    juce::TextButton askChatBtn { "ASK / MIDI" };
     juce::TextButton autoMasterBtn    { "AUTO MASTER" };
 
     juce::TextButton addFolderBtn     { "+ SAMPLE FOLDER" };

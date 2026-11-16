@@ -324,6 +324,100 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
             send_chat(f'Errore esecuzione comando: {str(e)[:52]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 
+
+import re
+
+def extract_musical_intent(prompt: str):
+    p = prompt.lower()
+    bpm_match = re.search(r'\b(1[0-5][0-9]|[89][0-9])\s*bpm\b', p)
+    bpm = float(bpm_match.group(1)) if bpm_match else None
+
+    key_match = re.search(r'\b([a-g](?:#|b)?m?)\b', prompt, re.IGNORECASE)
+    key = None
+    if key_match:
+        cand = key_match.group(1)
+        if cand.lower() not in ['a', 'e', 'in', 'di', 'un', 'il', 'la', 'su', 'per', 'con', 'fa', 'do', 're', 'mi', 'sol', 'si']:
+            key = cand[0].upper() + cand[1:]
+        else:
+            ita_map = {'do': 'C', 're': 'D', 'mi': 'E', 'fa': 'F', 'sol': 'G', 'la': 'A', 'si': 'B'}
+            if cand.lower() in ita_map:
+                key = ita_map[cand.lower()] + ('m' if 'minor' in p or 'minore' in p else '')
+
+    is_midi_req = any(k in p for k in ['midi', 'basso', 'bass', 'arp', 'arpeggio', 'pad', 'accordi', 'chords', 'melodia', 'melody', 'lead', 'linea di'])
+    is_create_req = any(k in p for k in ['crea', 'genera', 'aggiungi', 'scrivi', 'fammi', 'metti', 'create', 'generate', 'add', 'make'])
+    return is_midi_req and is_create_req, key, bpm
+
+def query_studio_advisor(question: str) -> str:
+    sys_prompt = (
+        "Sei NEURAL LAB Copilot, un ingegnere del suono e produttore di musica elettronica. "
+        "Rispondi in italiano in massimo 2 frasi brevi, concrete e pratiche (max 140 caratteri totali), senza JSON."
+    )
+    payload = json.dumps({
+        'model': CUSTOM_MODEL_NAME,
+        'system': sys_prompt,
+        'prompt': question,
+        'stream': False,
+        'keep_alive': -1,
+        'options': {'temperature': 0.35, 'num_predict': 90}
+    }).encode('utf-8')
+    req = urllib.request.Request('http://127.0.0.1:11434/api/generate', data=payload, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            ans = data.get('response', '').strip().replace('\n', ' ')
+            if ans.startswith('{') or not ans:
+                return "Taglia sotto i 30Hz con filtro ripido, scava 2-3dB sui 250Hz per pulire il fango e lascia spazio al kick."
+            return ans[:175]
+    except Exception:
+        return "Per un mix pulito: high-pass a 30Hz sul master, sidechain leggero sul basso e controllo medio-bassi a 250Hz."
+
+def handle_ask_chat(address, user_text):
+    def worker():
+        try:
+            text = str(user_text).strip()
+            if not text:
+                return
+            is_midi, parsed_key, parsed_bpm = extract_musical_intent(text)
+            if is_midi:
+                key = parsed_key or active_session_state.get('key', 'Fm')
+                bpm = parsed_bpm or active_session_state.get('bpm', 126.0)
+                active_session_state['key'] = key
+                active_session_state['bpm'] = bpm
+                if parsed_bpm:
+                    ableton_client.send_message('/live/song/set/tempo', [bpm])
+
+                p_low = text.lower()
+                if any(w in p_low for w in ['pad', 'accordi', 'chords']):
+                    role_name = f"NL PAD ({key})"
+                    notes = midi_composer.generate_pad_chords(key=key, bars=4)
+                elif any(w in p_low for w in ['arp', 'arpeggio', 'melodia', 'melody', 'lead']):
+                    role_name = f"NL ARP ({key})"
+                    notes = midi_composer.generate_hypnotic_arp(key=key, bars=4)
+                else:
+                    role_name = f"NL BASS ({key})"
+                    notes = midi_composer.generate_rolling_bass(key=key, bars=4)
+
+                send_status(f'CREATING MIDI: {role_name}')
+                send_chat(f'Ok, genero "{role_name}" a {int(bpm)} BPM su Ableton Live...')
+
+                next_track_idx = len(active_session_state.get('stems', []))
+                write_midi_clip_to_ableton(next_track_idx, 0, role_name, notes, 16.0, create_track=True)
+                ableton_client.send_message('/live/clip/fire', [next_track_idx, 0])
+
+                active_session_state['stems'].append({'track_idx': next_track_idx, 'role': role_name, 'is_midi': True})
+                vst_client.send_message('/neural_lab/stem_selected', [next_track_idx, role_name, f"{role_name.replace(' ', '_')}.mid", 0.99])
+                send_status(f'MIDI CREATED: {role_name}')
+                send_chat(f'Fatto! Traccia MIDI "{role_name}" creata e avviata su Ableton.')
+            else:
+                send_status('AI COPILOT: THINKING...')
+                reply = query_studio_advisor(text)
+                send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
+                send_chat(reply)
+        except Exception as e:
+            traceback.print_exc()
+            send_status('CHAT ERROR')
+            send_chat(f'Errore elaborazione richiesta: {str(e)[:48]}', is_error=True)
+    threading.Thread(target=worker, daemon=True).start()
 if __name__ == '__main__':
     threading.Thread(target=ensure_ollama_and_model_ready, daemon=True).start()
     disp = dispatcher.Dispatcher()
@@ -331,6 +425,7 @@ if __name__ == '__main__':
     disp.map('/neural_lab/add_folder', handle_add_folder)
     disp.map('/neural_lab/set_reference', handle_set_reference)
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
+    disp.map('/neural_lab/ask', handle_ask_chat)
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()

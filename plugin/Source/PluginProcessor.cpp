@@ -108,6 +108,15 @@ void NeuralLabAudioProcessor::swapStemAtIndex(int stemIndex) {
     oscSender.send(msg);
 }
 
+
+void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
+    if (question.trim().isEmpty()) return;
+    chatHistory.push_back({ "TU: " + question.trim(), false });
+    if (chatHistory.size() > 3) chatHistory.erase(chatHistory.begin());
+    juce::OSCMessage msg("/neural_lab/ask");
+    msg.addString(question.trim());
+    oscSender.send(msg);
+}
 void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message) {
     auto addr = message.getAddressPattern().toString();
     if (addr == "/neural_lab/set_dsp" && message.size() >= 5) {

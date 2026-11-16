@@ -9,6 +9,10 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     promptInput.setTextToShowWhenEmpty("Describe track or arrangement (e.g. 'Dark Melodic Techno 126 BPM, Fm, -8.5 LUFS')...", juce::Colour(0xff6b7280));
     promptInput.setFont(juce::FontOptions(13.5f));
     addAndMakeVisible(promptInput);
+    promptInput.onReturnKey = [this]() { auto q = promptInput.getText(); promptInput.clear(); audioProcessor.sendChatQuestion(q); repaint(); };
+    addAndMakeVisible(askChatBtn);
+    askChatBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0284c7));
+    askChatBtn.onClick = [this]() { auto q = promptInput.getText(); promptInput.clear(); audioProcessor.sendChatQuestion(q); repaint(); };
 
     generateTrackBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff005f73));
     generateTrackBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff00e5ff));

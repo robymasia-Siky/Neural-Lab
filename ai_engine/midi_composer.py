@@ -54,3 +54,18 @@ class NeuralMidiComposer:
             val = round(0.25 + 0.60 * (progress ** 1.4), 3)
             points.append((round(s * 0.25, 3), val))
         return points
+
+
+    def generate_pad_chords(self, key: str = "Fm", bars: int = 4) -> list:
+        root = self.NOTE_MAP.get(key.strip(), 53)
+        is_minor = key.strip().endswith("m")
+        intervals = [0, 3, 7, 10] if is_minor else [0, 4, 7, 11]
+        progression = [0, -4, -2, -5] if is_minor else [0, -3, -5, -7]
+        notes = []
+        for bar in range(bars):
+            shift = progression[bar % len(progression)]
+            start_beat = float(bar * 4.0)
+            for iv in intervals:
+                pitch = max(36, min(84, root + shift + iv))
+                notes.append([pitch, start_beat, 3.85, 78, 0])
+        return notes
