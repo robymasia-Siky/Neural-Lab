@@ -1,10 +1,17 @@
 import os
+import json
 import subprocess
 import torch
-from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments
+from torch.utils.data import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    BitsAndBytesConfig,
+    TrainingArguments,
+    Trainer,
+    DataCollatorForSeq2Seq
+)
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
-from trl import SFTTrainer
 
 BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 DATASET_PATH = "training/neural_lab_dataset.jsonl"
@@ -12,8 +19,38 @@ ADAPTER_DIR = "training/neural_lab_lora_adapter"
 MERGED_DIR = "training/neural_lab_merged_0.5b"
 OLLAMA_MODEL_NAME = "neural-lab-0.5b"
 
+class StudioJsonDataset(Dataset):
+    def __init__(self, jsonl_path: str, tokenizer, max_length: int = 384):
+        self.samples = []
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                text = tokenizer.apply_chat_template(
+                    item["messages"],
+                    tokenize=False,
+                    add_generation_prompt=False
+                )
+                enc = tokenizer(
+                    text,
+                    truncation=True,
+                    max_length=max_length,
+                    padding=False
+                )
+                enc["labels"] = enc["input_ids"].copy()
+                self.samples.append(enc)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
+
 def run_qlora_training():
-    print(f"[QLoRA] CUDA Available: {torch.cuda.is_available()} | Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    print(f"[QLoRA] CUDA Available: {torch.cuda.is_available()} | Device: {gpu_name}", flush=True)
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -44,13 +81,8 @@ def run_qlora_training():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    dataset = load_dataset("json", data_files=DATASET_PATH, split="train")
-
-    def format_chat(example):
-        text = tokenizer.apply_chat_template(example["messages"], tokenize=False, add_generation_prompt=False)
-        return {"text": text}
-
-    dataset = dataset.map(format_chat)
+    train_dataset = StudioJsonDataset(DATASET_PATH, tokenizer, max_length=384)
+    print(f"[QLoRA] Loaded {len(train_dataset)} tokenized studio examples.", flush=True)
 
     training_args = TrainingArguments(
         output_dir="training/checkpoints",
@@ -65,24 +97,21 @@ def run_qlora_training():
         report_to="none"
     )
 
-    trainer = SFTTrainer(
+    trainer = Trainer(
         model=model,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=384,
-        tokenizer=tokenizer,
-        args=training_args
+        args=training_args,
+        train_dataset=train_dataset,
+        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True)
     )
 
-    print("[QLoRA] Starting 4-bit fine-tuning on 2,000 studio examples...")
+    print("[QLoRA] Starting 4-bit fine-tuning on GPU...", flush=True)
     trainer.train()
 
     model.save_pretrained(ADAPTER_DIR)
     tokenizer.save_pretrained(ADAPTER_DIR)
-    print(f"[QLoRA] LoRA adapter saved to {ADAPTER_DIR}")
+    print(f"[QLoRA] LoRA adapter saved to {ADAPTER_DIR}", flush=True)
 
-    # Merge LoRA weights in FP16 per esportazione diretta in Ollama
-    print("[EXPORT] Merging LoRA weights into standalone 0.5B model...")
+    print("[EXPORT] Merging LoRA weights into standalone 0.5B model...", flush=True)
     del model
     torch.cuda.empty_cache()
 
@@ -102,9 +131,9 @@ def run_qlora_training():
     with open(modelfile_path, "w", encoding="utf-8") as mf:
         mf.write(modelfile_content)
 
-    print(f"[OLLAMA] Registering fine-tuned model '{OLLAMA_MODEL_NAME}'...")
+    print(f"[OLLAMA] Registering fine-tuned model '{OLLAMA_MODEL_NAME}'...", flush=True)
     subprocess.run(["ollama", "create", OLLAMA_MODEL_NAME, "-f", modelfile_path], check=False)
-    print(f"[DONE] Fine-tuning complete! NEURAL LAB now uses '{OLLAMA_MODEL_NAME}'.")
+    print(f"[DONE] Fine-tuning complete! NEURAL LAB now uses '{OLLAMA_MODEL_NAME}'.", flush=True)
 
 if __name__ == "__main__":
     run_qlora_training()
