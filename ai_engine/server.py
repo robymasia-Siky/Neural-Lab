@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import socket
 import subprocess
 import threading
 import traceback
@@ -30,6 +31,11 @@ def send_status(text: str):
     print(f'[STATUS] {text}', flush=True)
     vst_client.send_message('/neural_lab/status', [str(text)])
 
+def send_chat(text: str, is_error: bool = False):
+    prefix = '[ERR] ' if is_error else '[AI] '
+    print(f'{prefix}{text}', flush=True)
+    vst_client.send_message('/neural_lab/chat', [str(text), 1 if is_error else 0])
+
 def ensure_ollama_and_model_ready():
     ollama_url = 'http://127.0.0.1:11434/api/tags'
     is_running = False
@@ -41,8 +47,9 @@ def ensure_ollama_and_model_ready():
         is_running = False
 
     if not is_running:
-        send_status('BOOTING LOCAL OLLAMA ENGINE...')
-        creationflags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
+        send_status('BOOTING OLLAMA ENGINE...')
+        send_chat('Avvio il motore locale Ollama in background...')
+        creationflags = 0x08000000 if os.name == 'nt' else 0
         try:
             subprocess.Popen(['ollama', 'serve'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
             for _ in range(15):
@@ -55,23 +62,20 @@ def ensure_ollama_and_model_ready():
                 except Exception:
                     continue
         except Exception as e:
-            print(f'[OLLAMA] Could not start ollama serve: {e}', flush=True)
+            send_chat(f'Errore avvio Ollama: {str(e)[:45]}', is_error=True)
 
-    # Verifica se neural-lab-0.5b e' presente, altrimenti lo registra dal GGUF locale
     try:
         with urllib.request.urlopen(ollama_url, timeout=2.0) as resp:
             tags_data = json.loads(resp.read().decode('utf-8'))
             models = [m.get('name', '') for m in tags_data.get('models', [])]
-            has_custom = any(CUSTOM_MODEL_NAME in m for m in models)
-            if not has_custom:
+            if not any(CUSTOM_MODEL_NAME in m for m in models):
                 modelfile = os.path.join(PROJECT_ROOT, 'training', 'Modelfile')
                 if os.path.exists(modelfile):
-                    send_status('REGISTERING NEURAL-LAB-0.5B...')
+                    send_chat('Registro il modello custom neural-lab-0.5b...')
                     subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
-    except Exception as e:
-        print(f'[OLLAMA] Model check warning: {e}', flush=True)
+    except Exception:
+        pass
 
-    # Pre-carica il modello in VRAM (keep_alive = -1) per latenza <30ms
     try:
         warmup_payload = json.dumps({
             'model': CUSTOM_MODEL_NAME,
@@ -83,8 +87,10 @@ def ensure_ollama_and_model_ready():
         req = urllib.request.Request('http://127.0.0.1:11434/api/generate', data=warmup_payload, headers={'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=8)
         send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
+        send_chat('Pronto! Modello neural-lab-0.5b attivo su GPU. Dimmi cosa produrre.')
     except Exception:
-        send_status('AI ONLINE: READY (PORT 9001)')
+        send_status('AI ONLINE: FALLBACK MODE')
+        send_chat('Avviso: modello custom non rilevato, uso modalita fallback.', is_error=True)
 
 orchestrator = NeuralOrchestrator(model_name=CUSTOM_MODEL_NAME, fallback_model='qwen2.5:0.5b')
 indexer = SampleLibraryIndexer()
@@ -99,8 +105,7 @@ def load_audio_fast(filepath: str, max_seconds: int = 30):
         import soundfile as sf
         info = sf.info(filepath)
         sr = info.samplerate
-        frames_to_read = int(sr * max_seconds)
-        data, _ = sf.read(filepath, frames=frames_to_read, dtype='float32', always_2d=True)
+        data, _ = sf.read(filepath, frames=int(sr * max_seconds), dtype='float32', always_2d=True)
         return np.mean(data, axis=1), sr
     except Exception:
         import librosa
@@ -110,12 +115,20 @@ def load_audio_fast(filepath: str, max_seconds: int = 30):
 def handle_add_folder(address, folder_path):
     def worker():
         try:
-            send_status(f'CLAP: INDEXING {os.path.basename(folder_path)}...')
+            folder_name = os.path.basename(folder_path)
+            send_status(f'CLAP: INDEXING {folder_name}...')
+            send_chat(f'Ok, indicizzo i sample nella cartella "{folder_name}" con CLAP...')
             total = indexer.add_folder_incremental(folder_path)
-            send_status(f'LIBRARY READY: {total} SAMPLES INDEXED')
+            if total == 0:
+                send_status('LIBRARY: 0 SAMPLES')
+                send_chat('Attenzione: nessun file audio valido trovato in questa cartella.', is_error=True)
+            else:
+                send_status(f'LIBRARY READY: {total} SAMPLES')
+                send_chat(f'Perfetto! Libreria aggiornata: {total} sample pronti per la ricerca.')
         except Exception as e:
             traceback.print_exc()
-            send_status(f'INDEX ERR: {str(e)[:28]}')
+            send_status('INDEX ERROR')
+            send_chat(f'Errore indicizzazione sample: {str(e)[:50]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 
 def handle_set_reference(address, ref_path):
@@ -124,12 +137,16 @@ def handle_set_reference(address, ref_path):
         try:
             clean_path = os.path.normpath(str(ref_path).strip().strip('"'))
             if not os.path.exists(clean_path):
-                send_status('REF ERR: FILE NOT FOUND')
+                send_status('REF ERR: NOT FOUND')
+                send_chat('Errore: file reference non trovato sul disco.', is_error=True)
                 return
-            send_status('MATCHERING: ANALYZING AUDIO...')
+            fname = os.path.basename(clean_path)
+            send_status('MATCHERING: EXTRACTING EQ...')
+            send_chat(f'Ok, analizzo spettro EQ e loudness di "{fname}"...')
             y, sr = load_audio_fast(clean_path, max_seconds=30)
             if y is None or len(y) < 2048:
-                send_status('REF ERR: AUDIO TOO SHORT')
+                send_status('REF ERR: TOO SHORT')
+                send_chat('Errore: il file reference e troppo corto per l analisi.', is_error=True)
                 return
             rms = float(np.sqrt(np.mean(y ** 2))) + 1e-8
             ref_lufs = float(20.0 * np.log10(rms) - 0.691)
@@ -148,10 +165,12 @@ def handle_set_reference(address, ref_path):
             curve = [float(np.clip((db_spec[min(int(1.09 ** i), len(db_spec) - 1)] + 55.0) / 55.0, 0.08, 0.92)) for i in range(64)]
             current_reference_profile = {'target_lufs': ref_lufs, 'path': clean_path, 'curve': curve}
             vst_client.send_message('/neural_lab/ref_curve', [float(v) for v in curve])
-            send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS + EQ CURVE')
+            send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS')
+            send_chat(f'Curva Reference agganciata! Target impostato a {round(ref_lufs, 1)} LUFS.')
         except Exception as exc:
             traceback.print_exc()
-            send_status(f'REF ERR: {str(exc)[:30]}')
+            send_status('REF ERROR')
+            send_chat(f'Errore analisi reference: {str(exc)[:48]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 
 def write_midi_clip_to_ableton(track_idx: int, scene_idx: int, name: str, notes: list, clip_len: float = 16.0, create_track: bool = True):
@@ -195,6 +214,7 @@ def handle_swap_stem(address, stem_idx, role):
             offset = active_session_state['swap_offsets'].get(stem_idx, 0) + 1
             active_session_state['swap_offsets'][stem_idx] = offset
             key = active_session_state['key']
+            send_chat(f'Ok, cerco un alternativa per lo stem {role}...')
             if 'MIDI' in role.upper():
                 notes = midi_composer.generate_rolling_bass(key, 4) if 'BASS' in role.upper() else midi_composer.generate_hypnotic_arp(key, 4)
                 clean_role = role.replace('MIDI ', '')
@@ -202,7 +222,8 @@ def handle_swap_stem(address, stem_idx, role):
                 write_midi_clip_to_ableton(stem_idx, 0, new_name, notes, 16.0, create_track=False)
                 ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
                 vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, new_name, 0.99])
-                send_status(f'SWAPPED {role}: NEW VARIATION #{offset}')
+                send_status(f'SWAPPED {role}: VAR #{offset}')
+                send_chat(f'Nuova variazione MIDI generata per {role} (#{offset}).')
             else:
                 query = f'dark melodic techno {role.lower()}'
                 matches = indexer.search_samples(query, top_k=offset + 2)
@@ -211,16 +232,26 @@ def handle_swap_stem(address, stem_idx, role):
                     ableton_client.send_message('/live/clip/set/file_path', [stem_idx, 0, sample['path']])
                     ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
                     vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, sample['filename'], float(sample['similarity'])])
-                    send_status(f"SWAPPED {role} -> {sample['filename']}")
+                    send_status(f"SWAPPED {role}")
+                    send_chat(f"Stem {role} sostituito con {sample['filename']}.")
+                else:
+                    send_chat('Attenzione: nessun altro sample disponibile. Aggiungi altre cartelle!', is_error=True)
         except Exception as e:
             traceback.print_exc()
-            send_status(f'SWAP ERR: {str(e)[:28]}')
+            send_chat(f'Errore cambio stem: {str(e)[:48]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 
 def handle_plugin_command(address, mode, prompt_text, ref_path=''):
     def worker():
         try:
-            send_status('NEURAL-LAB-0.5B: COMPOSING...')
+            if mode == 'auto_master':
+                send_chat('Ok, eseguo mix e auto-mastering sul bus principale...')
+            elif mode == 'arrange_full':
+                send_chat('Ok, creo la traccia e costruisco l arrangiamento completo a 6 scene...')
+            else:
+                send_chat('Ok, analizzo il prompt con neural-lab-0.5b e preparo gli stems...')
+
+            send_status('NEURAL-LAB-0.5B: THINKING...')
             plan = orchestrator.parse_prompt(prompt_text)
             genre = plan.get('genre', 'melodic_techno')
             bpm = float(plan.get('bpm', 126))
@@ -239,9 +270,13 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                 active_session_state['swap_offsets'] = {}
                 ableton_client.send_message('/live/song/set/tempo', [bpm])
                 track_cursor = 0
-                for q in plan.get('sample_queries', [])[:2]:
+                queries = plan.get('sample_queries', [])[:2]
+                found_any_sample = False
+
+                for q in queries:
                     matches = indexer.search_samples(q['query'], top_k=1, sample_type=q.get('type'))
                     if matches:
+                        found_any_sample = True
                         s = matches[0]
                         selected_paths.append(s['path'])
                         active_session_state['stems'].append({'track_idx': track_cursor, 'role': q['role'], 'path': s['path'], 'is_midi': False})
@@ -251,6 +286,9 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                         ableton_client.send_message('/live/clip/set/file_path', [track_cursor, 0, s['path']])
                         ableton_client.send_message('/live/clip/fire', [track_cursor, 0])
                         track_cursor += 1
+
+                if not found_any_sample:
+                    send_chat('Nota: libreria sample vuota, genero le tracce MIDI su Ableton.', is_error=True)
 
                 bass_notes = midi_composer.generate_rolling_bass(key=key, bars=4)
                 write_midi_clip_to_ableton(track_cursor, 0, f'NL BASS ({key})', bass_notes, 16.0, create_track=True)
@@ -266,15 +304,24 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                 vst_client.send_message('/neural_lab/stem_selected', [track_cursor, 'MIDI ARP', f'Hypnotic_{key}_Auto.mid', 0.99])
 
                 if mode == 'arrange_full':
-                    send_status('BUILDING 6-SCENE CLUB ARRANGEMENT...')
+                    send_status('BUILDING 6-SCENE ARRANGEMENT...')
                     build_full_club_arrangement(key, bpm)
 
             dsp_params = mix_engine.compute_dsp_profile(genre, target_lufs, float(mix_target.get('punch', 0.5)), selected_paths)
             vst_client.send_message('/neural_lab/set_dsp', [dsp_params['lowcut'], dsp_params['punch'], dsp_params['width'], dsp_params['drive'], dsp_params['ceiling']])
             send_status(f'ACTIVE: {mode.upper()} ({key} @ {int(bpm)} BPM)')
+
+            if mode == 'auto_master':
+                send_chat(f'Mastering completato! Target {round(target_lufs, 1)} LUFS, Punch {int(dsp_params["punch"]*100)}%, Width {int(dsp_params["width"]*100)}%.')
+            elif mode == 'arrange_full':
+                send_chat(f'Arrangiamento completato in {key} a {int(bpm)} BPM! 6 scene pronte su Ableton.')
+            else:
+                send_chat(f'Fatto! Base in {key} a {int(bpm)} BPM inviata ad Ableton e DSP calibrato.')
+
         except Exception as e:
             traceback.print_exc()
-            send_status(f'CMD ERR: {str(e)[:28]}')
+            send_status('EXECUTION ERROR')
+            send_chat(f'Errore esecuzione comando: {str(e)[:52]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == '__main__':
