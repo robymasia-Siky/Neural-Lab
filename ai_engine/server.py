@@ -34,23 +34,45 @@ def handle_add_folder(address, folder_path):
 def handle_set_reference(address, ref_path):
     def worker():
         global current_reference_profile
-        if not os.path.exists(ref_path):
-            return
-        send_status('MATCHERING: EXTRACTING 64-BAND EQ CURVE...')
-        y, sr = librosa.load(ref_path, sr=22050, duration=30.0)
-        rms = float(np.sqrt(np.mean(y**2))) + 1e-8
-        ref_lufs = float(20.0 * np.log10(rms) - 0.691)
-        S = np.abs(librosa.stft(y, n_fft=2048))
-        mean_spec = np.mean(S, axis=1)
-        db_spec = librosa.amplitude_to_db(mean_spec, ref=np.max)
-        curve = []
-        for i in range(64):
-            b = min(int(1.09 ** i), len(db_spec) - 1)
-            norm = float((db_spec[b] + 55.0) / 55.0)
-            curve.append(float(np.clip(norm, 0.08, 0.92)))
-        current_reference_profile = {'target_lufs': ref_lufs, 'path': ref_path, 'curve': curve}
-        vst_client.send_message('/neural_lab/ref_curve', curve)
-        send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS + EQ CURVE')
+        try:
+            if not os.path.exists(ref_path):
+                send_status('REF ERROR: FILE NOT FOUND')
+                return
+            send_status('MATCHERING: EXTRACTING 64-BAND EQ CURVE...')
+            import soundfile as sf
+            try:
+                data, sr = sf.read(ref_path, frames=44100 * 30, dtype='float32', always_2d=True)
+                y = np.mean(data, axis=1)
+            except Exception:
+                y, sr = librosa.load(ref_path, sr=22050, duration=30.0, mono=True)
+            if len(y) == 0:
+                send_status('REF ERROR: EMPTY AUDIO')
+                return
+            rms = float(np.sqrt(np.mean(y**2))) + 1e-8
+            ref_lufs = float(20.0 * np.log10(rms) - 0.691)
+            n_fft = 2048
+            win = np.hanning(n_fft)
+            hop = 1024
+            specs = []
+            for start in range(0, max(1, len(y) - n_fft), hop):
+                frame = y[start:start + n_fft]
+                if len(frame) < n_fft:
+                    break
+                specs.append(np.abs(np.fft.rfft(frame * win)))
+            mean_spec = np.mean(specs, axis=0) if specs else np.abs(np.fft.rfft(y[:n_fft]))
+            max_val = float(np.max(mean_spec)) + 1e-8
+            db_spec = 20.0 * np.log10(mean_spec / max_val + 1e-8)
+            curve = []
+            for i in range(64):
+                b = min(int(1.09 ** i), len(db_spec) - 1)
+                norm = float((db_spec[b] + 55.0) / 55.0)
+                curve.append(float(np.clip(norm, 0.08, 0.92)))
+            current_reference_profile = {'target_lufs': ref_lufs, 'path': ref_path, 'curve': curve}
+            vst_client.send_message('/neural_lab/ref_curve', curve)
+            send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS + EQ CURVE')
+        except Exception as exc:
+            print(f'[REF ERROR] {exc}')
+            send_status(f'REF ERR: {str(exc)[:28]}')
     threading.Thread(target=worker, daemon=True).start()
 
 def write_midi_clip_to_ableton(track_idx: int, scene_idx: int, name: str, notes: list, clip_len: float = 16.0, create_track: bool = True):
