@@ -1,3 +1,5 @@
+from install_ableton_osc import ensure_ableton_osc_installed
+ensure_ableton_osc_installed()
 import os
 import threading
 import numpy as np
