@@ -1,7 +1,11 @@
 import os
 import sys
+import time
+import json
+import subprocess
 import threading
 import traceback
+import urllib.request
 import numpy as np
 from pythonosc import dispatcher, osc_server, udp_client
 
@@ -9,7 +13,7 @@ try:
     from install_ableton_osc import ensure_ableton_osc_installed
     ensure_ableton_osc_installed()
 except Exception as e:
-    print(f"[AbletonOSC init warning] {e}")
+    print(f"[AbletonOSC init warning] {e}", flush=True)
 
 from orchestrator import NeuralOrchestrator
 from audio_indexer import SampleLibraryIndexer
@@ -19,7 +23,70 @@ from midi_composer import NeuralMidiComposer
 vst_client = udp_client.SimpleUDPClient('127.0.0.1', 9002)
 ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 
-orchestrator = NeuralOrchestrator(model_name='qwen2.5:0.5b')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+CUSTOM_MODEL_NAME = 'neural-lab-0.5b'
+
+def send_status(text: str):
+    print(f'[STATUS] {text}', flush=True)
+    vst_client.send_message('/neural_lab/status', [str(text)])
+
+def ensure_ollama_and_model_ready():
+    ollama_url = 'http://127.0.0.1:11434/api/tags'
+    is_running = False
+    try:
+        with urllib.request.urlopen(ollama_url, timeout=1.5) as resp:
+            if resp.status == 200:
+                is_running = True
+    except Exception:
+        is_running = False
+
+    if not is_running:
+        send_status('BOOTING LOCAL OLLAMA ENGINE...')
+        creationflags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
+        try:
+            subprocess.Popen(['ollama', 'serve'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
+            for _ in range(15):
+                time.sleep(0.5)
+                try:
+                    with urllib.request.urlopen(ollama_url, timeout=1.0) as resp:
+                        if resp.status == 200:
+                            is_running = True
+                            break
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f'[OLLAMA] Could not start ollama serve: {e}', flush=True)
+
+    # Verifica se neural-lab-0.5b e' presente, altrimenti lo registra dal GGUF locale
+    try:
+        with urllib.request.urlopen(ollama_url, timeout=2.0) as resp:
+            tags_data = json.loads(resp.read().decode('utf-8'))
+            models = [m.get('name', '') for m in tags_data.get('models', [])]
+            has_custom = any(CUSTOM_MODEL_NAME in m for m in models)
+            if not has_custom:
+                modelfile = os.path.join(PROJECT_ROOT, 'training', 'Modelfile')
+                if os.path.exists(modelfile):
+                    send_status('REGISTERING NEURAL-LAB-0.5B...')
+                    subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
+    except Exception as e:
+        print(f'[OLLAMA] Model check warning: {e}', flush=True)
+
+    # Pre-carica il modello in VRAM (keep_alive = -1) per latenza <30ms
+    try:
+        warmup_payload = json.dumps({
+            'model': CUSTOM_MODEL_NAME,
+            'prompt': 'warmup',
+            'stream': False,
+            'keep_alive': -1,
+            'options': {'num_predict': 1}
+        }).encode('utf-8')
+        req = urllib.request.Request('http://127.0.0.1:11434/api/generate', data=warmup_payload, headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=8)
+        send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
+    except Exception:
+        send_status('AI ONLINE: READY (PORT 9001)')
+
+orchestrator = NeuralOrchestrator(model_name=CUSTOM_MODEL_NAME, fallback_model='qwen2.5:0.5b')
 indexer = SampleLibraryIndexer()
 mix_engine = NeuralMixMasterEngine()
 midi_composer = NeuralMidiComposer()
@@ -27,12 +94,7 @@ midi_composer = NeuralMidiComposer()
 current_reference_profile = None
 active_session_state = {'key': 'Fm', 'bpm': 126.0, 'stems': [], 'swap_offsets': {}}
 
-def send_status(text: str):
-    print(f'[STATUS] {text}', flush=True)
-    vst_client.send_message('/neural_lab/status', [str(text)])
-
 def load_audio_fast(filepath: str, max_seconds: int = 30):
-    # Tentativo 1: soundfile (WAV, FLAC, OGG, AIFF - velocissimo)
     try:
         import soundfile as sf
         info = sf.info(filepath)
@@ -40,13 +102,10 @@ def load_audio_fast(filepath: str, max_seconds: int = 30):
         frames_to_read = int(sr * max_seconds)
         data, _ = sf.read(filepath, frames=frames_to_read, dtype='float32', always_2d=True)
         return np.mean(data, axis=1), sr
-    except Exception as e1:
-        print(f"[soundfile fallback] {e1}", flush=True)
-
-    # Tentativo 2: librosa / audioread (MP3, M4A, ecc.)
-    import librosa
-    y, sr = librosa.load(filepath, sr=22050, duration=float(max_seconds), mono=True)
-    return y, sr
+    except Exception:
+        import librosa
+        y, sr = librosa.load(filepath, sr=22050, duration=float(max_seconds), mono=True)
+        return y, sr
 
 def handle_add_folder(address, folder_path):
     def worker():
@@ -64,21 +123,16 @@ def handle_set_reference(address, ref_path):
         global current_reference_profile
         try:
             clean_path = os.path.normpath(str(ref_path).strip().strip('"'))
-            print(f"[REF] Loading: {clean_path}", flush=True)
             if not os.path.exists(clean_path):
                 send_status('REF ERR: FILE NOT FOUND')
                 return
-
             send_status('MATCHERING: ANALYZING AUDIO...')
             y, sr = load_audio_fast(clean_path, max_seconds=30)
-
             if y is None or len(y) < 2048:
                 send_status('REF ERR: AUDIO TOO SHORT')
                 return
-
             rms = float(np.sqrt(np.mean(y ** 2))) + 1e-8
             ref_lufs = float(20.0 * np.log10(rms) - 0.691)
-
             n_fft = 2048
             win = np.hanning(n_fft).astype(np.float32)
             hop = 2048
@@ -87,36 +141,17 @@ def handle_set_reference(address, ref_path):
                 specs = [np.abs(np.fft.rfft(y[:n_fft] * win))]
             else:
                 step_stride = max(1, num_frames // 120)
-                specs = []
-                for idx in range(0, num_frames, step_stride):
-                    start = idx * hop
-                    frame = y[start:start + n_fft]
-                    specs.append(np.abs(np.fft.rfft(frame * win)))
-
+                specs = [np.abs(np.fft.rfft(y[idx * hop:idx * hop + n_fft] * win)) for idx in range(0, num_frames, step_stride)]
             mean_spec = np.mean(specs, axis=0)
             max_val = float(np.max(mean_spec)) + 1e-8
             db_spec = 20.0 * np.log10(mean_spec / max_val + 1e-8)
-
-            curve = []
-            for i in range(64):
-                b = min(int(1.09 ** i), len(db_spec) - 1)
-                norm = float((db_spec[b] + 55.0) / 55.0)
-                curve.append(float(np.clip(norm, 0.08, 0.92)))
-
-            current_reference_profile = {
-                'target_lufs': ref_lufs,
-                'path': clean_path,
-                'curve': curve
-            }
-
+            curve = [float(np.clip((db_spec[min(int(1.09 ** i), len(db_spec) - 1)] + 55.0) / 55.0, 0.08, 0.92)) for i in range(64)]
+            current_reference_profile = {'target_lufs': ref_lufs, 'path': clean_path, 'curve': curve}
             vst_client.send_message('/neural_lab/ref_curve', [float(v) for v in curve])
             send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS + EQ CURVE')
-            print(f"[REF] Done! LUFS={round(ref_lufs, 1)}", flush=True)
-
         except Exception as exc:
             traceback.print_exc()
             send_status(f'REF ERR: {str(exc)[:30]}')
-
     threading.Thread(target=worker, daemon=True).start()
 
 def write_midi_clip_to_ableton(track_idx: int, scene_idx: int, name: str, notes: list, clip_len: float = 16.0, create_track: bool = True):
@@ -148,8 +183,7 @@ def build_full_club_arrangement(key: str, bpm: float):
             if t_idx in active_tracks:
                 if stem['is_midi']:
                     notes = midi_composer.generate_rolling_bass(key, 4) if 'BASS' in stem['role'] else midi_composer.generate_hypnotic_arp(key, 4)
-                    clip_label = f"{stem['role']} ({sec_name[:7]})"
-                    write_midi_clip_to_ableton(t_idx, s_idx, clip_label, notes, 16.0, create_track=False)
+                    write_midi_clip_to_ableton(t_idx, s_idx, f"{stem['role']} ({sec_name[:7]})", notes, 16.0, create_track=False)
                 elif stem.get('path'):
                     ableton_client.send_message('/live/clip_slot/create_clip', [t_idx, s_idx, 16.0])
                     ableton_client.send_message('/live/clip/set/file_path', [t_idx, s_idx, stem['path']])
@@ -186,7 +220,7 @@ def handle_swap_stem(address, stem_idx, role):
 def handle_plugin_command(address, mode, prompt_text, ref_path=''):
     def worker():
         try:
-            send_status('0.5B ORCHESTRATOR: PLANNING...')
+            send_status('NEURAL-LAB-0.5B: COMPOSING...')
             plan = orchestrator.parse_prompt(prompt_text)
             genre = plan.get('genre', 'melodic_techno')
             bpm = float(plan.get('bpm', 126))
@@ -244,11 +278,12 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
     threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == '__main__':
+    threading.Thread(target=ensure_ollama_and_model_ready, daemon=True).start()
     disp = dispatcher.Dispatcher()
     disp.map('/neural_lab/command', handle_plugin_command)
     disp.map('/neural_lab/add_folder', handle_add_folder)
     disp.map('/neural_lab/set_reference', handle_set_reference)
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
-    print('NEURAL LAB v1.1 ENGINE READY ON 127.0.0.1:9001', flush=True)
+    print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
