@@ -3,11 +3,12 @@
 #include <juce_dsp/juce_dsp.h>
 #include <array>
 #include <atomic>
+#include <cmath>
 
 class NeuralDSP {
 public:
     static constexpr int fftOrder = 11;
-    static constexpr int fftSize = 1 << fftOrder; // 2048 punti
+    static constexpr int fftSize = 1 << fftOrder;
 
     NeuralDSP() : forwardFFT(fftOrder), window(fftSize, juce::dsp::WindowingFunction<float>::hann) {}
 
@@ -24,14 +25,16 @@ public:
     void updateParameters(float lowCutHz, float punchAmount, float widthAmount, float ceilingDb, float driveDb) {
         lowCutFilter.setCutoffFrequency(juce::jlimit(20.0f, 300.0f, lowCutHz));
 
-        // Punch controlla threshold e ratio del compressore
-        compressor.setThreshold(juce::jmap(punchAmount, 0.0f, 1.0f, 0.0f, -24.0f));
-        compressor.setRatio(juce::jmap(punchAmount, 0.0f, 1.0f, 1.0f, 6.0f));
+        compThresholdDb = juce::jmap(punchAmount, 0.0f, 1.0f, 0.0f, -24.0f);
+        compRatio = juce::jmap(punchAmount, 0.0f, 1.0f, 1.0f, 6.0f);
+        compressor.setThreshold(compThresholdDb);
+        compressor.setRatio(compRatio);
         compressor.setAttack(12.0f);
         compressor.setRelease(90.0f);
 
         stereoWidth = juce::jlimit(0.0f, 2.0f, widthAmount);
         inputGainLinear = juce::Decibels::decibelsToGain(driveDb);
+        limiterCeilingDb = ceilingDb;
         limiter.setThreshold(ceilingDb);
     }
 
@@ -39,13 +42,19 @@ public:
         const int numChannels = buffer.getNumChannels();
         const int numSamples = buffer.getNumSamples();
 
-        // 1. Input Drive / Gain Staging
+        // 1. Input Drive
         buffer.applyGain(inputGainLinear);
+
+        // Calcola livello pre-dinamica per stimare Gain Reduction
+        float prePeak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch) {
+            prePeak = juce::jmax(prePeak, buffer.getMagnitude(ch, 0, numSamples));
+        }
 
         juce::dsp::AudioBlock<float> block(buffer);
         juce::dsp::ProcessContextReplacing<float> context(block);
 
-        // 2. Low-Cut Sub Cleaning
+        // 2. Sub Clean High-Pass
         lowCutFilter.process(context);
 
         // 3. Punch Compressor
@@ -63,16 +72,31 @@ public:
             }
         }
 
-        // 5. True-Peak Mastering Limiter
+        // 5. True-Peak Limiter
         limiter.process(context);
 
-        // 6. Calcolo Metering RMS/Peak & Feed FFT per UI
+        // 6. Calcolo Output RMS, LUFS momentaneo e Gain Reduction (dB)
         float sumSq = 0.0f;
+        float postPeak = 0.0f;
         for (int ch = 0; ch < numChannels; ++ch) {
             sumSq += buffer.getRMSLevel(ch, 0, numSamples);
+            postPeak = juce::jmax(postPeak, buffer.getMagnitude(ch, 0, numSamples));
         }
-        currentRms.store(sumSq / juce::jmax(1, numChannels));
+        float avgRms = sumSq / juce::jmax(1, numChannels);
+        currentRms.store(avgRms);
 
+        // Stima LUFS (K-weighted approximation da RMS stereo)
+        float lufsVal = (avgRms > 1e-6f) ? (juce::Decibels::gainToDecibels(avgRms) - 0.691f) : -60.0f;
+        currentLufs.store(juce::jlimit(-60.0f, 0.0f, lufsVal));
+
+        // Calcolo Gain Reduction totale (Compressore + Limiter)
+        float grDb = 0.0f;
+        if (prePeak > postPeak && prePeak > 1e-5f) {
+            grDb = juce::Decibels::gainToDecibels(prePeak) - juce::Decibels::gainToDecibels(postPeak);
+        }
+        currentGainReductionDb.store(juce::jlimit(0.0f, 24.0f, grDb));
+
+        // 7. Feed FFT
         const auto* monoRead = buffer.getReadPointer(0);
         for (int i = 0; i < numSamples; ++i) {
             pushNextSampleIntoFifo(monoRead[i]);
@@ -80,6 +104,8 @@ public:
     }
 
     float getRMSLevel() const { return currentRms.load(); }
+    float getLUFS() const { return currentLufs.load(); }
+    float getGainReductionDb() const { return currentGainReductionDb.load(); }
 
     bool getNextFFTBlock(std::array<float, fftSize / 2>& dest) {
         if (!nextFFTBlockReady.load()) return false;
@@ -108,7 +134,13 @@ private:
     double sampleRate = 44100.0;
     float stereoWidth = 1.0f;
     float inputGainLinear = 1.0f;
+    float compThresholdDb = -12.0f;
+    float compRatio = 3.0f;
+    float limiterCeilingDb = -0.3f;
+
     std::atomic<float> currentRms { 0.0f };
+    std::atomic<float> currentLufs { -60.0f };
+    std::atomic<float> currentGainReductionDb { 0.0f };
 
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter;
     juce::dsp::Compressor<float> compressor;

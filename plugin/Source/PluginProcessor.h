@@ -3,6 +3,12 @@
 #include <juce_osc/juce_osc.h>
 #include "DSP/NeuralDSP.h"
 
+struct SelectedStemInfo {
+    juce::String role;
+    juce::String filename;
+    float similarity = 0.0f;
+};
+
 class NeuralLabAudioProcessor : public juce::AudioProcessor,
                                 private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback> {
 public:
@@ -31,16 +37,26 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // Comunicazione verso Backend AI Python (porta 9001)
+    // Azioni automatiche verso il motore AI
+    void launchAIBackendIfNeeded();
     void sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode);
+    void addSampleFolder(const juce::File& folder);
+    void setReferenceTrack(const juce::File& refFile);
 
     juce::AudioProcessorValueTreeState apvts;
     NeuralDSP neuralDSP;
-    juce::String aiStatusMessage { "AI ENGINE: READY (LOCAL GPU)" };
+
+    juce::String aiStatusMessage { "AI ENGINE: STARTING..." };
+    juce::StringArray sampleFolders;
+    juce::String referenceTrackPath;
+    juce::String referenceTrackName { "None (Click to load)" };
+    std::vector<SelectedStemInfo> selectedStems;
 
 private:
     void oscMessageReceived(const juce::OSCMessage& message) override;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void saveUserConfig();
+    void loadUserConfig();
 
     juce::OSCSender oscSender;
     juce::OSCReceiver oscReceiver;
