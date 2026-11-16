@@ -1,58 +1,57 @@
-﻿import json
-import requests
-
-SYSTEM_PROMPT = """Sei il cervello orchestratore di NEURAL LAB, un sistema di produzione musicale e auto-mastering.
-Il tuo UNICO compito e' tradurre la richiesta dell'utente in un oggetto JSON valido e rigoroso.
-Non scrivere MAI spiegazioni o testo fuori dal JSON.
-
-Schema JSON obbligatorio:
-{
-  "genre": "stringa (es. melodic_techno, deep_house, rave_techno)",
-  "bpm": numero (es. 126),
-  "key": "stringa (es. Fm, Am, Cm)",
-  "sample_queries": [
-    {"role": "kick", "query": "descrizione timbrica per CLAP", "type": "one_shot"},
-    {"role": "bass", "query": "descrizione basso per CLAP", "type": "loop"},
-    {"role": "synth", "query": "descrizione synth/arp per CLAP", "type": "loop"},
-    {"role": "perc", "query": "descrizione hihat/perc per CLAP", "type": "loop"}
-  ],
-  "mix_target": {
-    "target_lufs": numero (es. -8.5),
-    "punch": numero da 0.0 a 1.0,
-    "atmosphere": "dark | bright | warm"
-  }
-}"""
+import json
+import re
+import urllib.request
 
 class NeuralOrchestrator:
-    def __init__(self, model_name="qwen2.5:0.5b", ollama_url="http://127.0.0.1:11434/api/generate"):
+    def __init__(self, model_name: str = 'neural-lab-0.5b', fallback_model: str = 'qwen2.5:0.5b'):
         self.model_name = model_name
-        self.ollama_url = ollama_url
+        self.fallback_model = fallback_model
+        self.ollama_url = 'http://127.0.0.1:11434/api/generate'
+
+    def _query_ollama(self, model: str, prompt: str) -> str:
+        payload = json.dumps({
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'format': 'json',
+            'options': {'temperature': 0.15, 'num_predict': 260}
+        }).encode('utf-8')
+        req = urllib.request.Request(self.ollama_url, data=payload, headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return data.get('response', '')
 
     def parse_prompt(self, user_prompt: str) -> dict:
-        prompt_text = user_prompt.strip() or "Dark Melodic Techno 126 BPM, punchy low-end, -8.5 LUFS"
-        payload = {
-            "model": self.model_name,
-            "prompt": f"{SYSTEM_PROMPT}\n\nRichiesta utente: {prompt_text}\nJSON:",
-            "format": "json",
-            "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 350}
-        }
+        prompt_text = user_prompt.strip() or 'Dark Melodic Techno 126 BPM, Fm, punchy kick, -8.5 LUFS'
+        raw = ''
+        for m in [self.model_name, self.fallback_model]:
+            try:
+                raw = self._query_ollama(m, prompt_text)
+                if raw:
+                    break
+            except Exception:
+                continue
+
         try:
-            resp = requests.post(self.ollama_url, json=payload, timeout=15)
-            resp.raise_for_status()
-            raw_json = resp.json().get("response", "{}")
-            return json.loads(raw_json)
-        except Exception as e:
-            print(f"[Orchestrator Fallback] Uso profilo default ({e})")
-            return {
-                "genre": "melodic_techno",
-                "bpm": 126,
-                "key": "Fm",
-                "sample_queries": [
-                    {"role": "kick", "query": "punchy dark analog techno kick", "type": "one_shot"},
-                    {"role": "bass", "query": "rolling dark sub bassline", "type": "loop"},
-                    {"role": "synth", "query": "hypnotic minor arpeggio synth", "type": "loop"},
-                    {"role": "perc", "query": "crisp 909 closed hihat groove", "type": "loop"}
-                ],
-                "mix_target": {"target_lufs": -8.5, "punch": 0.65, "atmosphere": "dark"}
-            }
+            match = re.search(r'\{[\s\S]*\}', raw)
+            if match:
+                parsed = json.loads(match.group(0))
+                if 'sample_queries' in parsed and 'mix_target' in parsed:
+                    return parsed
+        except Exception:
+            pass
+
+        bpm_match = re.search(r'(\d{2,3})\s*bpm', prompt_text, re.IGNORECASE)
+        bpm = int(bpm_match.group(1)) if bpm_match else 126
+        key_match = re.search(r'\b([A-G][#b]?m)\b', prompt_text)
+        key = key_match.group(1) if key_match else 'Fm'
+        return {
+            'genre': 'melodic_techno',
+            'bpm': bpm,
+            'key': key,
+            'sample_queries': [
+                {'role': 'KICK', 'type': 'kick', 'query': 'tight punchy melodic techno kick'},
+                {'role': 'PERC', 'type': 'perc', 'query': 'crisp rolling 16th hi-hats and percussion'}
+            ],
+            'mix_target': {'target_lufs': -8.5, 'punch': 0.72, 'width': 1.18, 'drive': 1.5}
+        }
