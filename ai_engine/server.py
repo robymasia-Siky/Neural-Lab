@@ -25,7 +25,7 @@ vst_client = udp_client.SimpleUDPClient('127.0.0.1', 9002)
 ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-CUSTOM_MODEL_NAME = 'neural-lab-0.5b'
+CUSTOM_MODEL_NAME = 'neural-lab-0.5b:latest'
 
 def send_status(text: str):
     print(f'[STATUS] {text}', flush=True)
@@ -43,7 +43,7 @@ def ensure_ollama_and_model_ready():
         with urllib.request.urlopen(ollama_url, timeout=1.5) as resp:
             if resp.status == 200:
                 is_running = True
-    except Exception:
+    except Exception as warmup_err:
         is_running = False
 
     if not is_running:
@@ -59,7 +59,7 @@ def ensure_ollama_and_model_ready():
                         if resp.status == 200:
                             is_running = True
                             break
-                except Exception:
+                except Exception as warmup_err:
                     continue
         except Exception as e:
             send_chat(f'Errore avvio Ollama: {str(e)[:45]}', is_error=True)
@@ -73,7 +73,7 @@ def ensure_ollama_and_model_ready():
                 if os.path.exists(modelfile):
                     send_chat('Registro il modello custom neural-lab-0.5b...')
                     subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
-    except Exception:
+    except Exception as warmup_err:
         pass
 
     try:
@@ -85,10 +85,10 @@ def ensure_ollama_and_model_ready():
             'options': {'num_predict': 1}
         }).encode('utf-8')
         req = urllib.request.Request('http://127.0.0.1:11434/api/generate', data=warmup_payload, headers={'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=8)
+        urllib.request.urlopen(req, timeout=30)
         send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
         send_chat('Pronto! Modello neural-lab-0.5b attivo su GPU. Dimmi cosa produrre.')
-    except Exception:
+    except Exception as warmup_err:
         send_status('AI ONLINE: FALLBACK MODE')
         send_chat('Avviso: modello custom non rilevato, uso modalita fallback.', is_error=True)
 
@@ -107,7 +107,7 @@ def load_audio_fast(filepath: str, max_seconds: int = 30):
         sr = info.samplerate
         data, _ = sf.read(filepath, frames=int(sr * max_seconds), dtype='float32', always_2d=True)
         return np.mean(data, axis=1), sr
-    except Exception:
+    except Exception as warmup_err:
         import librosa
         y, sr = librosa.load(filepath, sr=22050, duration=float(max_seconds), mono=True)
         return y, sr
