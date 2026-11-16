@@ -305,6 +305,8 @@ void NeuralLabAudioProcessorEditor::resized() {
     promptRow.removeFromRight(6);
     generateTrackBtn.setBounds(promptRow.removeFromRight(130));
     promptRow.removeFromRight(8);
+    askChatBtn.setBounds(promptRow.removeFromRight(112));
+    promptRow.removeFromRight(6);
     promptInput.setBounds(promptRow);
 
     addFolderBtn.setBounds(30, 112, 128, 26);
