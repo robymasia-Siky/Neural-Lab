@@ -1,0 +1,34 @@
+﻿# C++ & JUCE Build
+plugin/build/
+cmake-build-*/
+*.exe
+*.vst3
+*.dll
+*.so
+*.dylib
+*.obj
+*.pdb
+*.lib
+*.exp
+
+# Python & Ambienti Virtuali
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Modelli AI, Pesi & Database Audio (Troppo pesanti per Git)
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.faiss
+*.db
+*.sqlite
+*.wav
+*.mp3
+*.aiff
+*.flac
