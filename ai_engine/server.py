@@ -42,11 +42,12 @@ def handle_set_reference(address, ref_path):
         ref_lufs = float(20.0 * np.log10(rms) - 0.691)
         S = np.abs(librosa.stft(y, n_fft=2048))
         mean_spec = np.mean(S, axis=1)
+        db_spec = librosa.amplitude_to_db(mean_spec, ref=np.max)
         curve = []
         for i in range(64):
-            b = min(int(1.09 ** i), len(mean_spec) - 1)
-            db = float(20.0 * np.log10(mean_spec[b] / 2048.0 + 1e-8) + 60.0)
-            curve.append(float(np.clip(db / 60.0, 0.05, 0.95)))
+            b = min(int(1.09 ** i), len(db_spec) - 1)
+            norm = float((db_spec[b] + 55.0) / 55.0)
+            curve.append(float(np.clip(norm, 0.08, 0.92)))
         current_reference_profile = {'target_lufs': ref_lufs, 'path': ref_path, 'curve': curve}
         vst_client.send_message('/neural_lab/ref_curve', curve)
         send_status(f'REF LOCKED: {round(ref_lufs, 1)} LUFS + EQ CURVE')
