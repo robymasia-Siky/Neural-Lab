@@ -181,6 +181,33 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
         g.strokePath(refPath, juce::PathStrokeType(2.2f));
         g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
         g.drawText("REF TARGET EQ CURVE", static_cast<int>(screenArea.getRight()) - 150, static_cast<int>(screenArea.getY()) + 6, 140, 14, juce::Justification::centredRight);
+    // AI Copilot Chat Response Feed (parte bassa di screenArea)
+    {
+        auto chatBox = screenArea.toNearestInt().withTrimmedTop(screenArea.toNearestInt().getHeight() - 56).reduced(8, 4);
+        g.setColour(juce::Colour::fromFloatRGBA(0.03f, 0.05f, 0.08f, 0.88f));
+        g.fillRoundedRectangle(chatBox.toFloat(), 5.0f);
+        g.setColour(juce::Colour::fromFloatRGBA(0.22f, 0.74f, 0.97f, 0.32f));
+        g.drawRoundedRectangle(chatBox.toFloat(), 5.0f, 1.0f);
+
+        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+        if (audioProcessor.chatHistory.empty())
+        {
+            g.setColour(juce::Colour(0xff94a3b8));
+            g.drawText("AI COPILOT: Pronto. Scrivi un comando e premi un tasto...", chatBox.reduced(8, 2), juce::Justification::centredLeft, true);
+        }
+        else
+        {
+            int rowH = chatBox.getHeight() / static_cast<int>(audioProcessor.chatHistory.size());
+            for (size_t i = 0; i < audioProcessor.chatHistory.size(); ++i)
+            {
+                const auto& entry = audioProcessor.chatHistory[i];
+                auto rowRect = chatBox.withY(chatBox.getY() + static_cast<int>(i) * rowH).withHeight(rowH).reduced(8, 0);
+                g.setColour(entry.isError ? juce::Colour(0xfff87171) : juce::Colour(0xff38bdf8));
+                juce::String prefix = entry.isError ? "AI [ERRORE]: " : "AI COPILOT: ";
+                g.drawText(prefix + entry.text, rowRect, juce::Justification::centredLeft, true);
+            }
+        }
+    }
     }
 
     juce::Rectangle<float> stemsBox(576.0f, 152.0f, 280.0f, 245.0f);

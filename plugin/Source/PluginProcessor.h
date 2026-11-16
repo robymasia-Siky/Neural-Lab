@@ -48,7 +48,9 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     NeuralDSP neuralDSP;
 
-    juce::String aiStatusMessage { "AI ENGINE: STARTING..." };
+    struct ChatLine { juce::String text; bool isError; };
+    std::vector<ChatLine> chatHistory;
+    juce::String aiStatusMessage { "AI: BOOTING NEURAL-LAB-0.5B..." };
     juce::StringArray sampleFolders;
     juce::String referenceTrackPath;
     juce::String referenceTrackName { "None (Click to load)" };

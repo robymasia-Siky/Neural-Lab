@@ -30,7 +30,7 @@ void NeuralLabAudioProcessor::launchAIBackendIfNeeded() {
         juce::StringArray cmd;
         cmd.add(pythonExe.getFullPathName());
         cmd.add(serverScript.getFullPathName());
-        if (proc.start(cmd)) aiStatusMessage = "AI ENGINE: ONLINE (GPU 8GB)";
+        if (proc.start(cmd)) { aiStatusMessage = "AI: NEURAL-LAB-0.5B (BOOTING)"; chatHistory.push_back({ "Avvio motore neural-lab-0.5b su RTX 4060...", false }); }
     } else {
         aiStatusMessage = "AI ENGINE: READY (PORT 9001)";
     }
@@ -128,6 +128,11 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
     } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
         for (int i = 0; i < 64; ++i) referenceEqCurve[i] = message[i].getFloat32();
         hasReferenceCurve = true;
+    } else if (addr == "/neural_lab/chat" && message.size() >= 1) {
+        juce::String msgText = message[0].getString();
+        bool isErr = (message.size() >= 2 && message[1].isInt32()) ? (message[1].getInt32() != 0) : false;
+        chatHistory.push_back({ msgText, isErr });
+        if (chatHistory.size() > 3) chatHistory.erase(chatHistory.begin());
     } else if (addr == "/neural_lab/status" && message.size() >= 1) {
         aiStatusMessage = message[0].getString();
     }
