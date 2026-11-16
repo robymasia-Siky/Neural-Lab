@@ -12,3 +12,5 @@ uvicorn
 python-osc
 requests
 pydantic
+
+torchvision
