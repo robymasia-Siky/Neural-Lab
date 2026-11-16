@@ -1,4 +1,4 @@
-﻿#include "PluginEditor.h"
+#include "PluginEditor.h"
 
 NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p) {
@@ -75,7 +75,7 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     widthAtt   = std::make_unique<Attachment>(audioProcessor.apvts, "width",   widthSlider);
     ceilingAtt = std::make_unique<Attachment>(audioProcessor.apvts, "ceiling", ceilingSlider);
 
-    startTimerHz(60);
+    splashProgress = 0.0f; startTimerHz(60);
 }
 
 NeuralLabAudioProcessorEditor::~NeuralLabAudioProcessorEditor() {
@@ -110,7 +110,7 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     }
     currentMeterLevel  = currentMeterLevel * 0.8f + audioProcessor.neuralDSP.getRMSLevel() * 0.2f;
     currentLufsDisplay = currentLufsDisplay * 0.85f + audioProcessor.neuralDSP.getLUFS() * 0.15f;
-    currentGrDisplay   = currentGrDisplay * 0.75f + audioProcessor.neuralDSP.getGainReductionDb() * 0.25f;
+    currentGrDisplay = currentGrDisplay * 0.75f + audioProcessor.neuralDSP.getGainReductionDb() * 0.25f; if (splashProgress < 1.0f) splashProgress = juce::jmin(1.0f, splashProgress + 0.008f);
     repaint();
 }
 
@@ -274,7 +274,7 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
     g.fillRoundedRectangle(bottomRack, 6.0f);
     g.setColour(juce::Colour(0xff252a36));
     g.drawRoundedRectangle(bottomRack, 6.0f, 1.0f);
-}
+    if (splashProgress < 1.0f) { float alpha = (splashProgress > 0.85f) ? (1.0f - (splashProgress - 0.85f) / 0.15f) : 1.0f; g.setColour(juce::Colour(0xff090b0f).withAlpha(alpha)); g.fillAll(); g.setColour(juce::Colour(0xff00e5ff).withAlpha(alpha)); g.drawRoundedRectangle(bounds.reduced(16.0f), 8.0f, 1.5f); g.setFont(juce::FontOptions(34.0f, juce::Font::bold)); g.setColour(juce::Colours::white.withAlpha(alpha)); g.drawText("NEURAL LAB", 0, 210, getWidth(), 44, juce::Justification::centred); g.setFont(juce::FontOptions(12.0f, juce::Font::bold)); g.setColour(juce::Colour(0xfff59e0b).withAlpha(alpha)); g.drawText("PRO STUDIO & AUTO-MASTERING WORKSTATION  v1.0", 0, 256, getWidth(), 22, juce::Justification::centred); float barW = 420.0f; float barX = (getWidth() - barW) * 0.5f; g.setColour(juce::Colour(0xff1e2430).withAlpha(alpha)); g.fillRoundedRectangle(barX, 310.0f, barW, 8.0f, 4.0f); g.setColour(juce::Colour(0xff00e5ff).withAlpha(alpha)); g.fillRoundedRectangle(barX, 310.0f, barW * splashProgress, 8.0f, 4.0f); juce::String stepTxt = splashProgress < 0.35f ? "INITIALIZING 64-BIT NEURAL DSP ENGINE..." : (splashProgress < 0.70f ? "MOUNTING LAION-CLAP GPU AUDIO CORTEX..." : "CONNECTING 0.5B MICRO-ORCHESTRATOR & ABLETON OSC..."); g.setFont(juce::FontOptions(11.0f)); g.setColour(juce::Colour(0xff94a3b8).withAlpha(alpha)); g.drawText(stepTxt, 0, 328, getWidth(), 20, juce::Justification::centred); } }
 
 void NeuralLabAudioProcessorEditor::resized() {
     auto area = getLocalBounds();
@@ -308,3 +308,4 @@ void NeuralLabAudioProcessorEditor::resized() {
     placeKnob(widthSlider,   widthLabel,   3);
     placeKnob(ceilingSlider, ceilingLabel, 4);
 }
+

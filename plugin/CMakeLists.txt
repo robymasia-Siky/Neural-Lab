@@ -23,7 +23,7 @@ juce_add_plugin(NeuralLab
     PLUGIN_MANUFACTURER_CODE Nlab
     PLUGIN_CODE Nlb1
     FORMATS VST3 Standalone
-    PRODUCT_NAME "NEURAL LAB"
+    PRODUCT_NAME "NEURAL LAB" ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon.png" ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon.png"
 )
 
 target_sources(NeuralLab PRIVATE
