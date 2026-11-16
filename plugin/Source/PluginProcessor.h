@@ -1,9 +1,11 @@
-﻿#pragma once
+#pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_osc/juce_osc.h>
+#include <array>
 #include "DSP/NeuralDSP.h"
 
 struct SelectedStemInfo {
+    int trackIndex = 0;
     juce::String role;
     juce::String filename;
     float similarity = 0.0f;
@@ -37,9 +39,9 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // Azioni automatiche verso il motore AI
     void launchAIBackendIfNeeded();
     void sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode);
+    void swapStemAtIndex(int stemIndex);
     void addSampleFolder(const juce::File& folder);
     void setReferenceTrack(const juce::File& refFile);
 
@@ -51,6 +53,8 @@ public:
     juce::String referenceTrackPath;
     juce::String referenceTrackName { "None (Click to load)" };
     std::vector<SelectedStemInfo> selectedStems;
+    std::array<float, 64> referenceEqCurve {};
+    bool hasReferenceCurve = false;
 
 private:
     void oscMessageReceived(const juce::OSCMessage& message) override;
