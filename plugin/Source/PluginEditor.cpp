@@ -205,11 +205,10 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
                 const auto& entry = audioProcessor.chatHistory[i];
                 auto rowRect = chatBox.withY(chatBox.getY() + static_cast<int>(i) * rowH).withHeight(rowH).reduced(8, 0);
                 g.setColour(entry.isError ? juce::Colour(0xfff87171) : juce::Colour(0xff38bdf8));
-                juce::String prefix = entry.isError ? "AI [ERRORE]: " : "AI COPILOT: ";
+                juce::String prefix = entry.isError ? "AI [ERRORE]: " : (entry.text.startsWith("TU: ") ? "" : "AI COPILOT: ");
                 g.drawText(prefix + entry.text, rowRect, juce::Justification::centredLeft, true);
             }
         }
-    }
     }
 
     juce::Rectangle<float> stemsBox(576.0f, 152.0f, 280.0f, 245.0f);
