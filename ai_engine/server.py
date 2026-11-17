@@ -1,3 +1,4 @@
+from ableton_mcp_agent import run_ableton_mcp_agent
 import os
 import sys
 import time
@@ -438,6 +439,19 @@ def handle_ask_chat(address, user_text):
             if not text:
                 return
             is_midi, parsed_key, parsed_bpm = extract_musical_intent(text)
+            # Se il prompt chiede azioni su Ableton (tracce, arrangiamento, velocity, envelope, synth, mixer, sessione) usa l'agente MCP con qwen2.5-coder:3b
+            mcp_keywords = ['ableton', 'traccia', 'track', 'velocity', 'envelope', 'automazione', 'automation',
+                            'arrangiamento', 'arrangement', 'synth', 'wavetable', 'operator', 'drift', 'effett',
+                            'reverb', 'delay', 'filter', 'cutoff', 'volume', 'pan', 'sessione', 'session',
+                            'cue', 'marker', 'loop', 'clip', 'device', 'carica', 'load', 'modifica', 'umanizza']
+            if any(k in text.lower() for k in mcp_keywords):
+                send_status('MCP AGENT: ANALYZING...')
+                ctx = f"Key={active_session_state.get('key', 'Fm')}, BPM={active_session_state.get('bpm', 126)}"
+                reply = run_ableton_mcp_agent(text, session_context=ctx, status_callback=send_status)
+                send_chat(reply)
+                send_status('NEURAL-LAB ENGINE: ONLINE')
+                return
+
             if is_midi:
                 key = parsed_key or active_session_state.get('key', 'Fm')
                 bpm = parsed_bpm or active_session_state.get('bpm', 126.0)
