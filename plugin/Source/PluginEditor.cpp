@@ -49,6 +49,15 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     };
     addAndMakeVisible(loadRefBtn);
 
+    mcpToggleBtn.setButtonText("MCP: ON");
+    mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff064e3b));
+    mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff34d399));
+    mcpToggleBtn.onClick = [this] {
+        audioProcessor.toggleMcpAgent();
+        repaint();
+    };
+    addAndMakeVisible(mcpToggleBtn);
+
     for (int i = 0; i < 4; ++i) {
         auditionButtons[i].setButtonText(">");
         auditionButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0f172a));
@@ -137,6 +146,16 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
             swapButtons[i].setEnabled(!isLck);
             swapButtons[i].setAlpha(isLck ? 0.45f : 1.0f);
         }
+    }
+    mcpToggleBtn.setVisible(splashProgress >= 0.9f);
+    if (audioProcessor.mcpAgentEnabled) {
+        mcpToggleBtn.setButtonText("MCP: ON");
+        mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff064e3b));
+        mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff34d399));
+    } else {
+        mcpToggleBtn.setButtonText("MCP: OFF");
+        mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
+        mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff64748b));
     }
     repaint();
 }
@@ -343,6 +362,7 @@ void NeuralLabAudioProcessorEditor::resized() {
 
     addFolderBtn.setBounds(30, 112, 128, 26);
     loadRefBtn.setBounds(822, 112, 128, 26);
+    mcpToggleBtn.setBounds(435, 13, 88, 26);
 
     for (int i = 0; i < 4; ++i) {
         int yBtn = 200 + i * 50;

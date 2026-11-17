@@ -7,6 +7,42 @@ ABLETON_MCP_PORT = 9877
 OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
 AGENT_MODEL = "qwen2.5-coder:3b"
 
+import os
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_settings.json")
+
+
+def is_mcp_enabled() -> bool:
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return bool(json.load(f).get("mcp_enabled", True))
+    except Exception:
+        pass
+    return True
+
+
+def set_mcp_enabled(enabled: bool):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"mcp_enabled": bool(enabled)}, f)
+    except Exception:
+        pass
+    # Warm-up o rilascio immediato della VRAM su Ollama
+    try:
+        payload = {
+            "model": AGENT_MODEL,
+            "messages": [],
+            "keep_alive": -1 if enabled else 0
+        }
+        req = urllib.request.Request(
+            OLLAMA_CHAT_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=10.0).read()
+    except Exception:
+        pass
+
 
 def send_mcp_command(command_type: str, params: dict = None) -> dict:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

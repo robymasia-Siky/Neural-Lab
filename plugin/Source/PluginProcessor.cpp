@@ -129,6 +129,13 @@ void NeuralLabAudioProcessor::toggleLockStemAtIndex(int stemIndex) {
     msg.addInt32(selectedStems[stemIndex].isLocked ? 1 : 0);
     oscSender.send(msg);
 }
+
+void NeuralLabAudioProcessor::toggleMcpAgent() {
+    mcpAgentEnabled = !mcpAgentEnabled;
+    juce::OSCMessage msg("/neural_lab/set_mcp_enabled");
+    msg.addInt32(mcpAgentEnabled ? 1 : 0);
+    oscSender.send(msg);
+}
 void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
     if (question.trim().isEmpty()) return;
     chatHistory.push_back({ "TU: " + question.trim(), false });
@@ -154,7 +161,7 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         info.similarity = message[3].getFloat32();
         if (idx >= 0 && idx < static_cast<int>(selectedStems.size())) { info.isLocked = selectedStems[idx].isLocked; selectedStems[idx] = info; }
         else selectedStems.push_back(info);
-    } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
+    } else if (addr == "/neural_lab/mcp_state" && message.size() >= 1) { mcpAgentEnabled = (message[0].getInt32() != 0); } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
         for (int i = 0; i < 64; ++i) referenceEqCurve[i] = message[i].getFloat32(); neuralDSP.setReferenceCurve(referenceEqCurve);
         hasReferenceCurve = true;
     } else if (addr == "/neural_lab/chat" && message.size() >= 1) {

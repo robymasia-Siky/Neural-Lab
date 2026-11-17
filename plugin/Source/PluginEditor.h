@@ -26,6 +26,7 @@ private:
 
     juce::TextButton addFolderBtn     { "+ SAMPLE FOLDER" };
     juce::TextButton loadRefBtn       { "LOAD REFERENCE" };
+    juce::TextButton mcpToggleBtn     { "MCP: ON" };
     std::array<juce::TextButton, 4> auditionButtons;
     std::array<juce::TextButton, 4> lockButtons;
     std::array<juce::TextButton, 4> swapButtons;

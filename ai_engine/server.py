@@ -1,4 +1,4 @@
-from ableton_mcp_agent import run_ableton_mcp_agent
+from ableton_mcp_agent import run_ableton_mcp_agent, is_mcp_enabled, set_mcp_enabled
 import os
 import sys
 import time
@@ -432,6 +432,16 @@ def query_studio_advisor(question: str) -> str:
     except Exception:
         return "Per un mix pulito: high-pass a 30Hz sul master, sidechain leggero sul basso e controllo medio-bassi a 250Hz."
 
+
+def handle_set_mcp_enabled(address, enabled_flag):
+    def worker():
+        state = (int(enabled_flag) != 0)
+        send_status('MCP AGENT: LOADING VRAM...' if state else 'MCP AGENT: UNLOADING VRAM...')
+        set_mcp_enabled(state)
+        vst_client.send_message('/neural_lab/mcp_state', [1 if state else 0])
+        send_status('MCP AGENT: ACTIVE' if state else 'MCP AGENT: DISABLED')
+        send_chat('Ableton MCP + Qwen Coder attivato e caricato in VRAM.' if state else 'Ableton MCP disattivato (VRAM liberata).')
+    threading.Thread(target=worker, daemon=True).start()
 def handle_ask_chat(address, user_text):
     def worker():
         try:
@@ -444,7 +454,7 @@ def handle_ask_chat(address, user_text):
                             'arrangiamento', 'arrangement', 'synth', 'wavetable', 'operator', 'drift', 'effett',
                             'reverb', 'delay', 'filter', 'cutoff', 'volume', 'pan', 'sessione', 'session',
                             'cue', 'marker', 'loop', 'clip', 'device', 'carica', 'load', 'modifica', 'umanizza']
-            if any(k in text.lower() for k in mcp_keywords):
+            if is_mcp_enabled() and any(k in text.lower() for k in mcp_keywords):
                 send_status('MCP AGENT: ANALYZING...')
                 ctx = f"Key={active_session_state.get('key', 'Fm')}, BPM={active_session_state.get('bpm', 126)}"
                 reply = run_ableton_mcp_agent(text, session_context=ctx, status_callback=send_status)
@@ -501,6 +511,14 @@ if __name__ == '__main__':
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
     disp.map('/neural_lab/audition_stem', handle_audition_stem)
     disp.map('/neural_lab/lock_stem', handle_lock_stem)
+    disp.map('/neural_lab/set_mcp_enabled', handle_set_mcp_enabled)
+    def init_mcp_on_boot():
+        time.sleep(1.5)
+        enabled = is_mcp_enabled()
+        vst_client.send_message('/neural_lab/mcp_state', [1 if enabled else 0])
+        if enabled:
+            set_mcp_enabled(True)
+    threading.Thread(target=init_mcp_on_boot, daemon=True).start()
     disp.map('/neural_lab/ask', handle_ask_chat)
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
