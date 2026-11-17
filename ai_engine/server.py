@@ -453,7 +453,7 @@ def handle_ask_chat(address, user_text):
             mcp_keywords = ['ableton', 'traccia', 'track', 'velocity', 'envelope', 'automazione', 'automation',
                             'arrangiamento', 'arrangement', 'synth', 'wavetable', 'operator', 'drift', 'effett',
                             'reverb', 'delay', 'filter', 'cutoff', 'volume', 'pan', 'sessione', 'session',
-                            'cue', 'marker', 'loop', 'clip', 'device', 'carica', 'load', 'modifica', 'umanizza']
+                            'cue', 'marker', 'loop', 'clip', 'device', 'carica', 'load', 'modifica', 'umanizza', 'hardware', 'cc', 'program', 'arm', 'timeline', 'view', 'cursore', 'scala', 'accordi', 'pattern']
             if is_mcp_enabled() and any(k in text.lower() for k in mcp_keywords):
                 send_status('MCP AGENT: ANALYZING...')
                 ctx = f"Key={active_session_state.get('key', 'Fm')}, BPM={active_session_state.get('bpm', 126)}"
