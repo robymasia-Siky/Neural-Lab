@@ -11,20 +11,20 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     addAndMakeVisible(promptInput);
     promptInput.onReturnKey = [this]() { auto q = promptInput.getText(); promptInput.clear(); audioProcessor.sendChatQuestion(q); repaint(); };
     addAndMakeVisible(askChatBtn);
-    askChatBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0284c7));
+    askChatBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0c2d48)); askChatBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff38bdf8));
     askChatBtn.onClick = [this]() { auto q = promptInput.getText(); promptInput.clear(); audioProcessor.sendChatQuestion(q); repaint(); };
 
-    generateTrackBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff005f73));
+    generateTrackBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff083344));
     generateTrackBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff00e5ff));
     generateTrackBtn.onClick = [this] { audioProcessor.sendPromptToAIEngine(promptInput.getText(), "generate_track"); };
     addAndMakeVisible(generateTrackBtn);
 
-    arrangeFullBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e1b4b));
+    arrangeFullBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e163b));
     arrangeFullBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffa78bfa));
     arrangeFullBtn.onClick = [this] { audioProcessor.sendPromptToAIEngine(promptInput.getText(), "arrange_full"); };
     addAndMakeVisible(arrangeFullBtn);
 
-    autoMasterBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff78350f));
+    autoMasterBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b1d08));
     autoMasterBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xfffbbf24));
     autoMasterBtn.onClick = [this] { audioProcessor.sendPromptToAIEngine(promptInput.getText(), "auto_master"); };
     addAndMakeVisible(autoMasterBtn);
@@ -39,7 +39,7 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     };
     addAndMakeVisible(addFolderBtn);
 
-    loadRefBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff27272a));
+    loadRefBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c1917));
     loadRefBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xfffbbf24));
     loadRefBtn.onClick = [this] {
         fileChooser = std::make_unique<juce::FileChooser>("Select Reference Track", juce::File::getSpecialLocation(juce::File::userMusicDirectory), "*.wav;*.mp3;*.flac;*.aiff");
@@ -213,10 +213,10 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
     g.setFont(juce::FontOptions(11.0f));
     juce::String folderText = "LIBRARIES: " + juce::String(audioProcessor.sampleFolders.size()) + " folder(s)";
     if (audioProcessor.sampleFolders.size() > 0) folderText += " [" + juce::File(audioProcessor.sampleFolders[audioProcessor.sampleFolders.size() - 1]).getFileName() + "]";
-    g.drawText(folderText, 165, 113, 350, 24, juce::Justification::centredLeft);
+    g.drawText(folderText, 165, 113, 285, 24, juce::Justification::centredLeft, true);
 
     g.setColour(juce::Colour(0xfffbbf24));
-    g.drawText("REF: " + audioProcessor.referenceTrackName, 530, 113, 280, 24, juce::Justification::centredRight);
+    g.drawText("REF: " + audioProcessor.referenceTrackName, 456, 113, 318, 24, juce::Justification::centredRight, true);
 
     juce::Rectangle<float> screenArea(24.0f, 152.0f, 540.0f, 245.0f);
     g.setColour(juce::Colour(0xff07090c));
