@@ -8,6 +8,7 @@ NeuralLabAudioProcessor::NeuralLabAudioProcessor()
       apvts(*this, nullptr, "PARAMETERS", createParameterLayout()) {
     oscSender.connect("127.0.0.1", 9001);
     if (oscReceiver.connect(9002)) oscReceiver.addListener(this);
+    refFormatManager.registerBasicFormats();
     loadUserConfig();
     launchAIBackendIfNeeded();
 }
@@ -53,9 +54,11 @@ void NeuralLabAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
     spec.numChannels = static_cast<juce::uint32>(getTotalNumOutputChannels());
     neuralDSP.prepare(spec);
+    const juce::ScopedLock sl(refAudioLock);
+    refTransportSource.prepareToPlay(samplesPerBlock, sampleRate);
 }
 
-void NeuralLabAudioProcessor::releaseResources() {}
+void NeuralLabAudioProcessor::releaseResources() { const juce::ScopedLock sl(refAudioLock); refTransportSource.releaseResources(); }
 
 void NeuralLabAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) {
     juce::ScopedNoDenormals noDenormals;
@@ -67,6 +70,15 @@ void NeuralLabAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         apvts.getRawParameterValue("ceiling")->load(),
         apvts.getRawParameterValue("drive")->load(), apvts.getRawParameterValue("eqmatch")->load());
     neuralDSP.process(buffer);
+
+    {
+        const juce::ScopedTryLock stl(refAudioLock);
+        if (stl.isLocked() && refTransportSource.isPlaying()) {
+            buffer.clear();
+            juce::AudioSourceChannelInfo info(&buffer, 0, buffer.getNumSamples());
+            refTransportSource.getNextAudioBlock(info);
+        }
+    }
 }
 
 void NeuralLabAudioProcessor::addSampleFolder(const juce::File& folder) {
@@ -83,11 +95,42 @@ void NeuralLabAudioProcessor::setReferenceTrack(const juce::File& refFile) {
     if (!refFile.existsAsFile()) return;
     referenceTrackPath = refFile.getFullPathName();
     referenceTrackName = refFile.getFileName();
+    {
+        const juce::ScopedLock sl(refAudioLock);
+        refTransportSource.stop();
+        refTransportSource.setSource(nullptr);
+        refReaderSource.reset();
+        if (auto* reader = refFormatManager.createReaderFor(refFile)) {
+            refReaderSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
+            refReaderSource->setLooping(true);
+            refTransportSource.setSource(refReaderSource.get(), 0, nullptr, reader->sampleRate);
+        }
+    }
     saveUserConfig();
     aiStatusMessage = "MATCHERING: EXTRACTING EQ CURVE...";
     juce::OSCMessage msg("/neural_lab/set_reference");
     msg.addString(referenceTrackPath);
     oscSender.send(msg);
+}
+
+void NeuralLabAudioProcessor::toggleReferencePlayback() {
+    const juce::ScopedLock sl(refAudioLock);
+    if (refReaderSource == nullptr && referenceTrackPath.isNotEmpty()) {
+        juce::File f(referenceTrackPath);
+        if (f.existsAsFile()) {
+            if (auto* reader = refFormatManager.createReaderFor(f)) {
+                refReaderSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
+                refReaderSource->setLooping(true);
+                refTransportSource.setSource(refReaderSource.get(), 0, nullptr, reader->sampleRate);
+            }
+        }
+    }
+    if (refReaderSource == nullptr) return;
+    if (refTransportSource.isPlaying()) {
+        refTransportSource.stop();
+    } else {
+        refTransportSource.start();
+    }
 }
 
 void NeuralLabAudioProcessor::sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode) {
@@ -187,7 +230,7 @@ void NeuralLabAudioProcessor::loadUserConfig() {
     auto cfgFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("NeuralLabAudio/config.xml");
     if (auto xml = juce::XmlDocument::parse(cfgFile)) {
         referenceTrackPath = xml->getStringAttribute("referenceTrack");
-        if (referenceTrackPath.isNotEmpty()) referenceTrackName = juce::File(referenceTrackPath).getFileName();
+        if (referenceTrackPath.isNotEmpty()) { juce::File rf(referenceTrackPath); referenceTrackName = rf.getFileName(); if (rf.existsAsFile()) { if (auto* r = refFormatManager.createReaderFor(rf)) { refReaderSource = std::make_unique<juce::AudioFormatReaderSource>(r, true); refReaderSource->setLooping(true); refTransportSource.setSource(refReaderSource.get(), 0, nullptr, r->sampleRate); } } }
         sampleFolders.clear();
         for (auto* child : xml->getChildIterator())
             if (child->hasTagName("Folder")) sampleFolders.add(child->getStringAttribute("path"));

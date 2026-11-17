@@ -1,5 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
 #include <array>
 #include "DSP/NeuralDSP.h"
@@ -50,6 +52,8 @@ public:
     void toggleMcpAgent();
     void addSampleFolder(const juce::File& folder);
     void setReferenceTrack(const juce::File& refFile);
+    void toggleReferencePlayback();
+    bool isReferencePlaying() const { return refTransportSource.isPlaying(); }
 
     juce::AudioProcessorValueTreeState apvts;
     NeuralDSP neuralDSP;
@@ -60,6 +64,10 @@ public:
     void sendChatQuestion(const juce::String& question);
     juce::StringArray sampleFolders;
     juce::String referenceTrackPath;
+    juce::AudioFormatManager refFormatManager;
+    std::unique_ptr<juce::AudioFormatReaderSource> refReaderSource;
+    juce::AudioTransportSource refTransportSource;
+    juce::CriticalSection refAudioLock;
     juce::String referenceTrackName { "None (Click to load)" };
     std::vector<SelectedStemInfo> selectedStems;
     std::array<float, 64> referenceEqCurve {};

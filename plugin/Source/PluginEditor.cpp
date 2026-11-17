@@ -49,6 +49,15 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     };
     addAndMakeVisible(loadRefBtn);
 
+    playRefBtn.setButtonText("> REF");
+    playRefBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
+    playRefBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xfffbbf24));
+    playRefBtn.onClick = [this] {
+        audioProcessor.toggleReferencePlayback();
+        repaint();
+    };
+    addAndMakeVisible(playRefBtn);
+
     mcpToggleBtn.setButtonText("MCP: ON");
     mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff064e3b));
     mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff34d399));
@@ -157,6 +166,13 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
         mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
         mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff64748b));
     }
+    bool hasRef = audioProcessor.referenceTrackPath.isNotEmpty();
+    bool isRefPlaying = audioProcessor.isReferencePlaying();
+    playRefBtn.setVisible(splashProgress >= 0.9f);
+    playRefBtn.setEnabled(hasRef);
+    playRefBtn.setAlpha(hasRef ? 1.0f : 0.45f);
+    playRefBtn.setButtonText(isRefPlaying ? "|| REF" : "> REF");
+    playRefBtn.setColour(juce::TextButton::buttonColourId, isRefPlaying ? juce::Colour(0xff78350f) : juce::Colour(0xff1e293b));
     repaint();
 }
 
@@ -361,7 +377,8 @@ void NeuralLabAudioProcessorEditor::resized() {
     promptInput.setBounds(promptRow);
 
     addFolderBtn.setBounds(30, 112, 128, 26);
-    loadRefBtn.setBounds(822, 112, 128, 26);
+    playRefBtn.setBounds(784, 112, 54, 26);
+    loadRefBtn.setBounds(842, 112, 108, 26);
     mcpToggleBtn.setBounds(435, 13, 88, 26);
 
     for (int i = 0; i < 4; ++i) {
