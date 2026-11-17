@@ -50,6 +50,18 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     addAndMakeVisible(loadRefBtn);
 
     for (int i = 0; i < 4; ++i) {
+        auditionButtons[i].setButtonText(">");
+        auditionButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0f172a));
+        auditionButtons[i].setColour(juce::TextButton::textColourOffId, juce::Colour(0xff10b981));
+        auditionButtons[i].onClick = [this, i] { audioProcessor.auditionStemAtIndex(i); repaint(); };
+        addChildComponent(auditionButtons[i]);
+
+        lockButtons[i].setButtonText("LOCK");
+        lockButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0f172a));
+        lockButtons[i].setColour(juce::TextButton::textColourOffId, juce::Colour(0xff94a3b8));
+        lockButtons[i].onClick = [this, i] { audioProcessor.toggleLockStemAtIndex(i); repaint(); };
+        addChildComponent(lockButtons[i]);
+
         swapButtons[i].setButtonText("SWAP");
         swapButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
         swapButtons[i].setColour(juce::TextButton::textColourOffId, juce::Colour(0xff00e5ff));
@@ -107,7 +119,25 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     currentLufsDisplay = currentLufsDisplay * 0.85f + audioProcessor.neuralDSP.getLUFS() * 0.15f;
     currentGrDisplay   = currentGrDisplay * 0.75f + audioProcessor.neuralDSP.getGainReductionDb() * 0.25f;
     if (splashProgress < 1.0f) splashProgress = juce::jmin(1.0f, splashProgress + 0.008f);
-    for (int i = 0; i < 4; ++i) swapButtons[i].setVisible(i < static_cast<int>(audioProcessor.selectedStems.size()) && splashProgress >= 0.9f);
+    for (int i = 0; i < 4; ++i) {
+        bool show = (i < static_cast<int>(audioProcessor.selectedStems.size()) && splashProgress >= 0.9f);
+        auditionButtons[i].setVisible(show);
+        lockButtons[i].setVisible(show);
+        swapButtons[i].setVisible(show);
+        if (show) {
+            bool isAud = (audioProcessor.auditioningStemIndex == i);
+            auditionButtons[i].setButtonText(isAud ? "||" : ">");
+            auditionButtons[i].setColour(juce::TextButton::buttonColourId, isAud ? juce::Colour(0xff065f46) : juce::Colour(0xff0f172a));
+
+            bool isLck = audioProcessor.selectedStems[i].isLocked;
+            lockButtons[i].setButtonText(isLck ? "LCKD" : "LOCK");
+            lockButtons[i].setColour(juce::TextButton::buttonColourId, isLck ? juce::Colour(0xff78350f) : juce::Colour(0xff0f172a));
+            lockButtons[i].setColour(juce::TextButton::textColourOffId, isLck ? juce::Colour(0xfffbbf24) : juce::Colour(0xff94a3b8));
+
+            swapButtons[i].setEnabled(!isLck);
+            swapButtons[i].setAlpha(isLck ? 0.45f : 1.0f);
+        }
+    }
     repaint();
 }
 
@@ -242,10 +272,10 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
             g.fillRoundedRectangle(rowRect, 4.0f);
             g.setColour(juce::Colour(0xfff59e0b));
             g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-            g.drawText(stem.role.toUpperCase() + " [" + juce::String(static_cast<int>(stem.similarity * 100)) + "%]", 592, yRow + 4, 195, 14, juce::Justification::centredLeft);
+            g.drawText(stem.role.toUpperCase() + " [" + juce::String(static_cast<int>(stem.similarity * 100)) + "%]", 592, yRow + 4, 138, 14, juce::Justification::centredLeft);
             g.setColour(juce::Colour(0xffe2e8f0));
             g.setFont(juce::FontOptions(11.0f));
-            g.drawText(stem.filename, 592, yRow + 20, 195, 18, juce::Justification::centredLeft, true);
+            g.drawText(stem.filename, 592, yRow + 20, 138, 18, juce::Justification::centredLeft, true);
             yRow += 50;
         }
     }
@@ -314,7 +344,12 @@ void NeuralLabAudioProcessorEditor::resized() {
     addFolderBtn.setBounds(30, 112, 128, 26);
     loadRefBtn.setBounds(822, 112, 128, 26);
 
-    for (int i = 0; i < 4; ++i) swapButtons[i].setBounds(794, 200 + i * 50, 48, 26);
+    for (int i = 0; i < 4; ++i) {
+        int yBtn = 200 + i * 50;
+        auditionButtons[i].setBounds(730, yBtn, 26, 26);
+        lockButtons[i].setBounds(758, yBtn, 38, 26);
+        swapButtons[i].setBounds(798, yBtn, 44, 26);
+    }
 
     auto knobRack = getLocalBounds().removeFromBottom(182).reduced(48, 12);
     int colWidth = knobRack.getWidth() / 6;

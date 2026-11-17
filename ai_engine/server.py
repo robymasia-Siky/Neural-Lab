@@ -208,6 +208,31 @@ def build_full_club_arrangement(key: str, bpm: float):
                     ableton_client.send_message('/live/clip/set/file_path', [t_idx, s_idx, stem['path']])
     ableton_client.send_message('/live/scene/fire', [2])
 
+
+def handle_audition_stem(address, stem_idx, solo_state):
+    def worker():
+        try:
+            solo_flag = 1 if int(solo_state) != 0 else 0
+            # Resetta eventuali altri solo prima di attivare quello richiesto
+            for idx in range(8):
+                ableton_client.send_message('/live/track/set/solo', [idx, 0])
+            if solo_flag == 1:
+                ableton_client.send_message('/live/track/set/solo', [int(stem_idx), 1])
+                ableton_client.send_message('/live/clip/fire', [int(stem_idx), 0])
+                send_status(f'AUDITION: TRACK #{int(stem_idx)+1} SOLO')
+            else:
+                send_status('NEURAL-LAB ENGINE: ONLINE')
+        except Exception as e:
+            traceback.print_exc()
+    threading.Thread(target=worker, daemon=True).start()
+
+def handle_lock_stem(address, stem_idx, is_locked):
+    idx = int(stem_idx)
+    locked = (int(is_locked) != 0)
+    if 0 <= idx < len(active_session_state.get('stems', [])):
+        active_session_state['stems'][idx]['locked'] = locked
+        role = active_session_state['stems'][idx].get('role', f'Track {idx+1}')
+        send_chat(f'Stem {role} {"bloccato (LOCKED)" if locked else "sbloccato"}.')
 def handle_swap_stem(address, stem_idx, role):
     def worker():
         try:
@@ -266,42 +291,77 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
 
             selected_paths = []
             if mode in ['generate_track', 'arrange_full']:
-                active_session_state['stems'] = []
-                active_session_state['swap_offsets'] = {}
+                prev_stems = active_session_state.get('stems', [])
+                locked_roles = {s['role']: s for s in prev_stems if s.get('locked', False)}
                 ableton_client.send_message('/live/song/set/tempo', [bpm])
-                track_cursor = 0
+
+                if not locked_roles:
+                    active_session_state['stems'] = []
+                    active_session_state['swap_offsets'] = {}
+                    track_cursor = 0
+                else:
+                    track_cursor = len(prev_stems)
+
                 queries = plan.get('sample_queries', [])[:2]
                 found_any_sample = False
 
                 for q in queries:
+                    if q['role'] in locked_roles:
+                        if locked_roles[q['role']].get('path'):
+                            selected_paths.append(locked_roles[q['role']]['path'])
+                        continue
                     matches = indexer.search_samples(q['query'], top_k=1, sample_type=q.get('type'))
                     if matches:
                         found_any_sample = True
                         s = matches[0]
                         selected_paths.append(s['path'])
-                        active_session_state['stems'].append({'track_idx': track_cursor, 'role': q['role'], 'path': s['path'], 'is_midi': False})
-                        vst_client.send_message('/neural_lab/stem_selected', [track_cursor, q['role'], s['filename'], float(s['similarity'])])
-                        ableton_client.send_message('/live/song/create_audio_track', [-1])
-                        ableton_client.send_message('/live/clip_slot/create_clip', [track_cursor, 0, 16.0])
-                        ableton_client.send_message('/live/clip/set/file_path', [track_cursor, 0, s['path']])
-                        ableton_client.send_message('/live/clip/fire', [track_cursor, 0])
-                        track_cursor += 1
+                        existing_idx = next((i for i, st in enumerate(active_session_state['stems']) if st['role'] == q['role'] and not st.get('locked')), None)
+                        target_idx = existing_idx if existing_idx is not None else track_cursor
+                        create_new = (existing_idx is None)
+                        stem_obj = {'track_idx': target_idx, 'role': q['role'], 'path': s['path'], 'is_midi': False, 'locked': False}
+                        if create_new:
+                            active_session_state['stems'].append(stem_obj)
+                            ableton_client.send_message('/live/song/create_audio_track', [-1])
+                            track_cursor += 1
+                        else:
+                            active_session_state['stems'][target_idx] = stem_obj
+                        vst_client.send_message('/neural_lab/stem_selected', [target_idx, q['role'], s['filename'], float(s['similarity'])])
+                        ableton_client.send_message('/live/clip_slot/create_clip', [target_idx, 0, 16.0])
+                        ableton_client.send_message('/live/clip/set/file_path', [target_idx, 0, s['path']])
+                        ableton_client.send_message('/live/clip/fire', [target_idx, 0])
 
-                if not found_any_sample:
+                if not found_any_sample and not locked_roles:
                     send_chat('Nota: libreria sample vuota, genero le tracce MIDI su Ableton.', is_error=True)
 
-                bass_notes = midi_composer.generate_rolling_bass(key=key, bars=4)
-                write_midi_clip_to_ableton(track_cursor, 0, f'NL BASS ({key})', bass_notes, 16.0, create_track=True)
-                ableton_client.send_message('/live/clip/fire', [track_cursor, 0])
-                active_session_state['stems'].append({'track_idx': track_cursor, 'role': 'MIDI BASS', 'is_midi': True})
-                vst_client.send_message('/neural_lab/stem_selected', [track_cursor, 'MIDI BASS', f'Rolling_{key}_Vel.mid', 0.99])
-                track_cursor += 1
+                if 'MIDI BASS' not in locked_roles:
+                    existing_bass = next((i for i, st in enumerate(active_session_state['stems']) if st['role'] == 'MIDI BASS' and not st.get('locked')), None)
+                    b_idx = existing_bass if existing_bass is not None else track_cursor
+                    c_bass = (existing_bass is None)
+                    bass_notes = midi_composer.generate_rolling_bass(key=key, bars=4)
+                    write_midi_clip_to_ableton(b_idx, 0, f'NL BASS ({key})', bass_notes, 16.0, create_track=c_bass)
+                    ableton_client.send_message('/live/clip/fire', [b_idx, 0])
+                    b_obj = {'track_idx': b_idx, 'role': 'MIDI BASS', 'is_midi': True, 'locked': False}
+                    if c_bass:
+                        active_session_state['stems'].append(b_obj)
+                        track_cursor += 1
+                    else:
+                        active_session_state['stems'][b_idx] = b_obj
+                    vst_client.send_message('/neural_lab/stem_selected', [b_idx, 'MIDI BASS', f'Rolling_{key}_Vel.mid', 0.99])
 
-                arp_notes = midi_composer.generate_hypnotic_arp(key=key, bars=4)
-                write_midi_clip_to_ableton(track_cursor, 0, f'NL ARP ({key})', arp_notes, 16.0, create_track=True)
-                ableton_client.send_message('/live/clip/fire', [track_cursor, 0])
-                active_session_state['stems'].append({'track_idx': track_cursor, 'role': 'MIDI ARP', 'is_midi': True})
-                vst_client.send_message('/neural_lab/stem_selected', [track_cursor, 'MIDI ARP', f'Hypnotic_{key}_Auto.mid', 0.99])
+                if 'MIDI ARP' not in locked_roles:
+                    existing_arp = next((i for i, st in enumerate(active_session_state['stems']) if st['role'] == 'MIDI ARP' and not st.get('locked')), None)
+                    a_idx = existing_arp if existing_arp is not None else track_cursor
+                    c_arp = (existing_arp is None)
+                    arp_notes = midi_composer.generate_hypnotic_arp(key=key, bars=4)
+                    write_midi_clip_to_ableton(a_idx, 0, f'NL ARP ({key})', arp_notes, 16.0, create_track=c_arp)
+                    ableton_client.send_message('/live/clip/fire', [a_idx, 0])
+                    a_obj = {'track_idx': a_idx, 'role': 'MIDI ARP', 'is_midi': True, 'locked': False}
+                    if c_arp:
+                        active_session_state['stems'].append(a_obj)
+                        track_cursor += 1
+                    else:
+                        active_session_state['stems'][a_idx] = a_obj
+                    vst_client.send_message('/neural_lab/stem_selected', [a_idx, 'MIDI ARP', f'Hypnotic_{key}_Auto.mid', 0.99])
 
                 if mode == 'arrange_full':
                     send_status('BUILDING 6-SCENE ARRANGEMENT...')
@@ -425,6 +485,8 @@ if __name__ == '__main__':
     disp.map('/neural_lab/add_folder', handle_add_folder)
     disp.map('/neural_lab/set_reference', handle_set_reference)
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
+    disp.map('/neural_lab/audition_stem', handle_audition_stem)
+    disp.map('/neural_lab/lock_stem', handle_lock_stem)
     disp.map('/neural_lab/ask', handle_ask_chat)
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)

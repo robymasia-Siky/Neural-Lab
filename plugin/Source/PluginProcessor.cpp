@@ -91,7 +91,7 @@ void NeuralLabAudioProcessor::setReferenceTrack(const juce::File& refFile) {
 }
 
 void NeuralLabAudioProcessor::sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode) {
-    if (mode == "generate_track" || mode == "arrange_full") selectedStems.clear();
+    if (mode == "generate_track" || mode == "arrange_full") { selectedStems.erase(std::remove_if(selectedStems.begin(), selectedStems.end(), [](const SelectedStemInfo& s) { return !s.isLocked; }), selectedStems.end()); auditioningStemIndex = -1; }
     aiStatusMessage = "AI: " + mode.toUpperCase() + "...";
     juce::OSCMessage msg("/neural_lab/command");
     msg.addString(mode);
@@ -101,7 +101,7 @@ void NeuralLabAudioProcessor::sendPromptToAIEngine(const juce::String& promptTex
 }
 
 void NeuralLabAudioProcessor::swapStemAtIndex(int stemIndex) {
-    if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size())) return;
+    if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size()) || selectedStems[stemIndex].isLocked) return;
     aiStatusMessage = "SWAPPING " + selectedStems[stemIndex].role.toUpperCase() + "...";
     juce::OSCMessage msg("/neural_lab/swap_stem");
     msg.addInt32(stemIndex);
@@ -110,6 +110,25 @@ void NeuralLabAudioProcessor::swapStemAtIndex(int stemIndex) {
 }
 
 
+
+void NeuralLabAudioProcessor::auditionStemAtIndex(int stemIndex) {
+    if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size())) return;
+    bool turnOn = (auditioningStemIndex != stemIndex);
+    auditioningStemIndex = turnOn ? stemIndex : -1;
+    juce::OSCMessage msg("/neural_lab/audition_stem");
+    msg.addInt32(selectedStems[stemIndex].trackIndex);
+    msg.addInt32(turnOn ? 1 : 0);
+    oscSender.send(msg);
+}
+
+void NeuralLabAudioProcessor::toggleLockStemAtIndex(int stemIndex) {
+    if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size())) return;
+    selectedStems[stemIndex].isLocked = !selectedStems[stemIndex].isLocked;
+    juce::OSCMessage msg("/neural_lab/lock_stem");
+    msg.addInt32(stemIndex);
+    msg.addInt32(selectedStems[stemIndex].isLocked ? 1 : 0);
+    oscSender.send(msg);
+}
 void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
     if (question.trim().isEmpty()) return;
     chatHistory.push_back({ "TU: " + question.trim(), false });
@@ -133,7 +152,7 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         info.role = message[1].getString();
         info.filename = message[2].getString();
         info.similarity = message[3].getFloat32();
-        if (idx >= 0 && idx < static_cast<int>(selectedStems.size())) selectedStems[idx] = info;
+        if (idx >= 0 && idx < static_cast<int>(selectedStems.size())) { info.isLocked = selectedStems[idx].isLocked; selectedStems[idx] = info; }
         else selectedStems.push_back(info);
     } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
         for (int i = 0; i < 64; ++i) referenceEqCurve[i] = message[i].getFloat32(); neuralDSP.setReferenceCurve(referenceEqCurve);

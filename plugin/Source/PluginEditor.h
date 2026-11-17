@@ -26,6 +26,8 @@ private:
 
     juce::TextButton addFolderBtn     { "+ SAMPLE FOLDER" };
     juce::TextButton loadRefBtn       { "LOAD REFERENCE" };
+    std::array<juce::TextButton, 4> auditionButtons;
+    std::array<juce::TextButton, 4> lockButtons;
     std::array<juce::TextButton, 4> swapButtons;
     std::unique_ptr<juce::FileChooser> fileChooser;
 

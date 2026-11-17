@@ -9,6 +9,7 @@ struct SelectedStemInfo {
     juce::String role;
     juce::String filename;
     float similarity = 0.0f;
+    bool isLocked = false;
 };
 
 class NeuralLabAudioProcessor : public juce::AudioProcessor,
@@ -42,6 +43,9 @@ public:
     void launchAIBackendIfNeeded();
     void sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode);
     void swapStemAtIndex(int stemIndex);
+    void auditionStemAtIndex(int stemIndex);
+    void toggleLockStemAtIndex(int stemIndex);
+    int auditioningStemIndex = -1;
     void addSampleFolder(const juce::File& folder);
     void setReferenceTrack(const juce::File& refFile);
 
