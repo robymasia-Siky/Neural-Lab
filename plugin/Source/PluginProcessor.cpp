@@ -31,7 +31,7 @@ void NeuralLabAudioProcessor::launchAIBackendIfNeeded() {
         juce::String args = "\"" + serverScript.getFullPathName() + "\"";
         if (pythonExe.startAsProcess(args)) {
             aiStatusMessage = "NEURAL-LAB: STARTING...";
-            chatHistory.push_back({ "Avvio motore NEURAL-LAB...", false });
+            chatHistory.push_back({ "Avvio motore NEURAL-LAB...", false }); chatDirty = true;
         }
     } else {
         aiStatusMessage = "AI ENGINE: READY (PORT 9001)";
@@ -180,10 +180,10 @@ void NeuralLabAudioProcessor::toggleMcpAgent() {
     msg.addInt32(mcpAgentEnabled ? 1 : 0);
     oscSender.send(msg);
 }
-void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
+void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) { if (question.trim().isNotEmpty()) { chatHistory.push_back({ "YOU: " + question.trim(), false }); if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true; }
     if (question.trim().isEmpty()) return;
     chatHistory.push_back({ "TU: " + question.trim(), false });
-    if (chatHistory.size() > 3) chatHistory.erase(chatHistory.begin());
+    if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true;
     juce::OSCMessage msg("/neural_lab/ask");
     msg.addString(question.trim());
     oscSender.send(msg);
@@ -212,7 +212,7 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         juce::String msgText = message[0].getString();
         bool isErr = (message.size() >= 2 && message[1].isInt32()) ? (message[1].getInt32() != 0) : false;
         chatHistory.push_back({ msgText, isErr });
-        if (chatHistory.size() > 3) chatHistory.erase(chatHistory.begin());
+        if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true;
     } else if (addr == "/neural_lab/status" && message.size() >= 1) {
         aiStatusMessage = message[0].getString();
     }

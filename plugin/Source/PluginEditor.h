@@ -19,6 +19,8 @@ private:
     DarkHardwareLookAndFeel darkLookAndFeel;
 
     juce::TextEditor promptInput;
+    juce::TextEditor chatDisplayBox;
+    size_t lastChatCount = 0;
     juce::TextButton generateTrackBtn { "GENERATE TRACK" };
     juce::TextButton arrangeFullBtn   { "ARRANGE FULL" };
     juce::TextButton askChatBtn { "ASK / MIDI" };
