@@ -1,0 +1,29 @@
+﻿name: Build and Release NEURAL-LAB
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure CMake
+        run: cmake -B plugin/build -S plugin -DCMAKE_BUILD_TYPE=Release
+      - name: Build VST3 and Standalone
+        run: cmake --build plugin/build --config Release -j 4
+      - name: Package Release ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release_pkg | Out-Null
+          Get-ChildItem -Path plugin/build -Filter 'NEURAL LAB.exe' -Recurse | Copy-Item -Destination release_pkg/
+          Get-ChildItem -Path plugin/build -Filter 'NEURAL LAB.vst3' -Recurse | Copy-Item -Destination release_pkg/ -Recurse
+          Copy-Item README.md, MANUALE_USO.md -Destination release_pkg/ -ErrorAction SilentlyContinue
+          Copy-Item assets -Destination release_pkg/assets -Recurse -ErrorAction SilentlyContinue
+          Compress-Archive -Path release_pkg/* -DestinationPath NEURAL-LAB-Windows-x64.zip -Force
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: NEURAL-LAB-Windows-x64.zip
+          generate_release_notes: true

@@ -35,3 +35,7 @@ __pycache__/
 
 training/checkpoints/
 training/neural_lab_merged_0.5b/
+
+*.zip
+dist/
+
