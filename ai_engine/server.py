@@ -513,9 +513,11 @@ if __name__ == '__main__':
     disp.map('/neural_lab/lock_stem', handle_lock_stem)
     disp.map('/neural_lab/set_mcp_enabled', handle_set_mcp_enabled)
     def init_mcp_on_boot():
-        time.sleep(1.5)
+        time.sleep(1.0)
         enabled = is_mcp_enabled()
         vst_client.send_message('/neural_lab/mcp_state', [1 if enabled else 0])
+        send_status('NEURAL-LAB ENGINE: ONLINE')
+        time.sleep(3.5)
         if enabled:
             set_mcp_enabled(True)
     threading.Thread(target=init_mcp_on_boot, daemon=True).start()
