@@ -10,6 +10,8 @@ import traceback
 import urllib.request
 import numpy as np
 from pythonosc import dispatcher, osc_server, udp_client
+vst_client = udp_client.SimpleUDPClient('127.0.0.1', 9002)
+ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 vst_client.send_message('/neural_lab/status', ['LOADING NEURAL MODELS...'])
 
 try:
@@ -35,8 +37,6 @@ def _lazy_load_heavy_engines():
         NeuralMixMasterEngine = _NME
     except Exception as e:
         print(f"[LazyLoad auto_master err] {e}", flush=True)
-
-ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 CUSTOM_MODEL_NAME = 'neural-lab-0.5b:latest'
