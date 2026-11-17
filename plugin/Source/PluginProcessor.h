@@ -50,7 +50,7 @@ public:
 
     struct ChatLine { juce::String text; bool isError; };
     std::vector<ChatLine> chatHistory;
-    juce::String aiStatusMessage { "AI: BOOTING NEURAL-LAB-0.5B..." };
+    juce::String aiStatusMessage { "NEURAL-LAB: STARTING..." };
     void sendChatQuestion(const juce::String& question);
     juce::StringArray sampleFolders;
     juce::String referenceTrackPath;

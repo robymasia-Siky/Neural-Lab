@@ -28,8 +28,8 @@ void NeuralLabAudioProcessor::launchAIBackendIfNeeded() {
     if (pythonExe.existsAsFile() && serverScript.existsAsFile()) {
         juce::String args = "\"" + serverScript.getFullPathName() + "\"";
         if (pythonExe.startAsProcess(args)) {
-            aiStatusMessage = "AI: NEURAL-LAB-0.5B (BOOTING)";
-            chatHistory.push_back({ "Avvio motore neural-lab-0.5b su RTX 4060...", false });
+            aiStatusMessage = "NEURAL-LAB: STARTING...";
+            chatHistory.push_back({ "Avvio motore NEURAL-LAB...", false });
         }
     } else {
         aiStatusMessage = "AI ENGINE: READY (PORT 9001)";

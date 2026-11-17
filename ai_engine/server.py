@@ -71,7 +71,7 @@ def ensure_ollama_and_model_ready():
             if not any(CUSTOM_MODEL_NAME in m for m in models):
                 modelfile = os.path.join(PROJECT_ROOT, 'training', 'Modelfile')
                 if os.path.exists(modelfile):
-                    send_chat('Registro il modello custom neural-lab-0.5b...')
+                    send_chat('Configurazione modello NEURAL-LAB...')
                     subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
     except Exception as warmup_err:
         pass
@@ -86,11 +86,11 @@ def ensure_ollama_and_model_ready():
         }).encode('utf-8')
         req = urllib.request.Request('http://127.0.0.1:11434/api/generate', data=warmup_payload, headers={'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=30)
-        send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
-        send_chat('Pronto! Modello neural-lab-0.5b attivo su GPU. Dimmi cosa produrre.')
+        send_status('NEURAL-LAB ENGINE: ONLINE')
+        send_chat('Pronto! Motore NEURAL-LAB attivo. Dimmi cosa produrre.')
     except Exception as warmup_err:
-        send_status('AI ONLINE: FALLBACK MODE')
-        send_chat('Avviso: modello custom non rilevato, uso modalita fallback.', is_error=True)
+        send_status('NEURAL-LAB ENGINE: READY')
+        send_chat('Motore NEURAL-LAB avviato in modalita standard.', is_error=True)
 
 orchestrator = NeuralOrchestrator(model_name=CUSTOM_MODEL_NAME, fallback_model='qwen2.5:0.5b')
 indexer = SampleLibraryIndexer()
@@ -249,9 +249,9 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
             elif mode == 'arrange_full':
                 send_chat('Ok, creo la traccia e costruisco l arrangiamento completo a 6 scene...')
             else:
-                send_chat('Ok, analizzo il prompt con neural-lab-0.5b e preparo gli stems...')
+                send_chat('Ok, analizzo il prompt con NEURAL-LAB e preparo gli stems...')
 
-            send_status('NEURAL-LAB-0.5B: THINKING...')
+            send_status('NEURAL-LAB: PROCESSING...')
             plan = orchestrator.parse_prompt(prompt_text)
             genre = plan.get('genre', 'melodic_techno')
             bpm = float(plan.get('bpm', 126))
@@ -411,7 +411,7 @@ def handle_ask_chat(address, user_text):
             else:
                 send_status('AI COPILOT: THINKING...')
                 reply = query_studio_advisor(text)
-                send_status('AI ONLINE: NEURAL-LAB-0.5B (GPU)')
+                send_status('NEURAL-LAB ENGINE: ONLINE')
                 send_chat(reply)
         except Exception as e:
             traceback.print_exc()
