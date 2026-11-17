@@ -173,6 +173,12 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     playRefBtn.setAlpha(hasRef ? 1.0f : 0.45f);
     playRefBtn.setButtonText(isRefPlaying ? "|| REF" : "> REF");
     playRefBtn.setColour(juce::TextButton::buttonColourId, isRefPlaying ? juce::Colour(0xff78350f) : juce::Colour(0xff1e293b));
+    if (audioProcessor.aiStatusMessage.containsIgnoreCase("STARTING")) {
+        if (++pingTickCounter >= 90) {
+            pingTickCounter = 0;
+            audioProcessor.oscSender.send(juce::OSCMessage("/neural_lab/ping"));
+        }
+    }
     repaint();
 }
 

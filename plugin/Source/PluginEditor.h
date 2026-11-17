@@ -45,6 +45,7 @@ private:
     float currentLufsDisplay = -60.0f;
     float currentGrDisplay = 0.0f;
     float splashProgress = 0.0f;
+    int pingTickCounter = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NeuralLabAudioProcessorEditor)
 };

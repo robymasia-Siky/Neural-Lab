@@ -19,9 +19,22 @@ except Exception as e:
     print(f"[AbletonOSC init warning] {e}", flush=True)
 
 from orchestrator import NeuralOrchestrator
-from audio_indexer import SampleLibraryIndexer
-from auto_master import NeuralMixMasterEngine
 from midi_composer import NeuralMidiComposer
+SampleLibraryIndexer = None
+NeuralMixMasterEngine = None
+
+def _lazy_load_heavy_engines():
+    global SampleLibraryIndexer, NeuralMixMasterEngine
+    try:
+        from audio_indexer import SampleLibraryIndexer as _SLI
+        SampleLibraryIndexer = _SLI
+    except Exception as e:
+        print(f"[LazyLoad audio_indexer err] {e}", flush=True)
+    try:
+        from auto_master import NeuralMixMasterEngine as _NME
+        NeuralMixMasterEngine = _NME
+    except Exception as e:
+        print(f"[LazyLoad auto_master err] {e}", flush=True)
 
 ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 
@@ -94,8 +107,14 @@ def ensure_ollama_and_model_ready():
         send_chat('Motore NEURAL-LAB avviato in modalita standard.', is_error=True)
 
 orchestrator = NeuralOrchestrator(model_name=CUSTOM_MODEL_NAME, fallback_model='qwen2.5:0.5b')
-indexer = SampleLibraryIndexer()
-mix_engine = NeuralMixMasterEngine()
+for _ in range(30):
+                if SampleLibraryIndexer is not None: break
+                time.sleep(0.5)
+            indexer = SampleLibraryIndexer()
+mix_for _ in range(30):
+                if NeuralMixMasterEngine is not None: break
+                time.sleep(0.5)
+            engine = NeuralMixMasterEngine()
 midi_composer = NeuralMidiComposer()
 
 current_reference_profile = None
@@ -503,6 +522,7 @@ def handle_ask_chat(address, user_text):
             send_chat(f'Errore elaborazione richiesta: {str(e)[:48]}', is_error=True)
     threading.Thread(target=worker, daemon=True).start()
 if __name__ == '__main__':
+    threading.Thread(target=_lazy_load_heavy_engines, daemon=True).start()
     threading.Thread(target=ensure_ollama_and_model_ready, daemon=True).start()
     disp = dispatcher.Dispatcher()
     disp.map('/neural_lab/command', handle_plugin_command)
