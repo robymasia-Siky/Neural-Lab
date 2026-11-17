@@ -1,0 +1,4 @@
+FROM C:\Users\Utente\Desktop\Neural Lab\NEURAL-LAB\training\neural-lab-0.5b.gguf
+PARAMETER temperature 0.15
+PARAMETER num_ctx 1024
+SYSTEM "You are NEURAL LAB 0.5B Studio Orchestrator. Output ONLY strict JSON production plans."

@@ -50,6 +50,25 @@ def send_chat(text: str, is_error: bool = False):
     print(f'{prefix}{text}', flush=True)
     vst_client.send_message('/neural_lab/chat', [str(text), 1 if is_error else 0])
 
+
+def _ensure_custom_gguf_downloaded():
+    import urllib.request
+    gguf_path = os.path.join(PROJECT_ROOT, 'training', 'neural-lab-0.5b.gguf')
+    mf_path = os.path.join(PROJECT_ROOT, 'training', 'Modelfile')
+    if not os.path.exists(gguf_path):
+        os.makedirs(os.path.dirname(gguf_path), exist_ok=True)
+        url = 'https://github.com/robymasia-Siky/Neural-Lab/releases/latest/download/neural-lab-0.5b.gguf'
+        try:
+            send_chat('Primo avvio: download del modello neurale NEURAL-LAB (948 MB) in corso...')
+            urllib.request.urlretrieve(url, gguf_path)
+        except Exception:
+            return False
+    if os.path.exists(gguf_path) and os.path.exists(mf_path):
+        _ensure_custom_gguf_downloaded()
+        subprocess.run(['ollama', 'create', 'neural-lab-0.5b:latest', '-f', mf_path], check=False)
+        return True
+    return False
+
 def ensure_ollama_and_model_ready():
     ollama_url = 'http://127.0.0.1:11434/api/tags'
     is_running = False
@@ -86,7 +105,8 @@ def ensure_ollama_and_model_ready():
                 modelfile = os.path.join(PROJECT_ROOT, 'training', 'Modelfile')
                 if os.path.exists(modelfile):
                     send_chat('Configurazione modello NEURAL-LAB...')
-                    subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
+                    _ensure_custom_gguf_downloaded()
+        subprocess.run(['ollama', 'create', CUSTOM_MODEL_NAME, '-f', modelfile], check=False)
     except Exception as warmup_err:
         pass
 
