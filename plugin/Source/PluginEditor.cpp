@@ -9,6 +9,17 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     promptInput.setTextToShowWhenEmpty("Describe track or arrangement (e.g. 'Dark Melodic Techno 126 BPM, Fm, -8.5 LUFS')...", juce::Colour(0xff6b7280));
     promptInput.setFont(juce::FontOptions(13.5f));
     addAndMakeVisible(promptInput);
+
+    chatDisplayBox.setMultiLine(true, true);
+    chatDisplayBox.setReadOnly(true);
+    chatDisplayBox.setScrollbarsShown(true);
+    chatDisplayBox.setCaretVisible(false);
+    chatDisplayBox.setPopupMenuEnabled(true);
+    chatDisplayBox.setFont(juce::FontOptions(11.5f));
+    chatDisplayBox.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff070b12));
+    chatDisplayBox.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff1e3a5f));
+    chatDisplayBox.setColour(juce::TextEditor::textColourId, juce::Colour(0xffe2e8f0));
+    addAndMakeVisible(chatDisplayBox);
     promptInput.onReturnKey = [this]() { auto q = promptInput.getText(); promptInput.clear(); audioProcessor.sendChatQuestion(q); repaint(); };
     addAndMakeVisible(askChatBtn);
     askChatBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff0c2d48)); askChatBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff38bdf8));
@@ -166,6 +177,26 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
         mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
         mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff64748b));
     }
+
+    chatDisplayBox.setVisible(splashProgress >= 0.9f);
+    if (audioProcessor.chatDirty || audioProcessor.chatHistory.size() != lastChatCount) {
+        audioProcessor.chatDirty = false;
+        lastChatCount = audioProcessor.chatHistory.size();
+        chatDisplayBox.clear();
+        for (size_t i = 0; i < audioProcessor.chatHistory.size(); ++i) {
+            const auto& entry = audioProcessor.chatHistory[i];
+            juce::String line = entry.text;
+            if (!line.startsWith("YOU:"))
+                line = "NEURAL-LAB: " + line;
+            juce::Colour lineCol = entry.isError
+                ? juce::Colour(0xfff87171)
+                : (line.startsWith("YOU:") ? juce::Colour(0xff38bdf8) : juce::Colour(0xffe2e8f0));
+            chatDisplayBox.setColour(juce::TextEditor::textColourId, lineCol);
+            chatDisplayBox.insertTextAtCaret(line + (i + 1 < audioProcessor.chatHistory.size() ? "\n\n" : ""));
+        }
+        chatDisplayBox.moveCaretToEnd();
+    }
+
     bool hasRef = audioProcessor.referenceTrackPath.isNotEmpty();
     bool isRefPlaying = audioProcessor.isReferencePlaying();
     playRefBtn.setVisible(splashProgress >= 0.9f);
@@ -260,33 +291,7 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
         g.drawText("REF TARGET EQ CURVE", static_cast<int>(screenArea.getRight()) - 150, static_cast<int>(screenArea.getY()) + 6, 140, 14, juce::Justification::centredRight);
     }
 
-    // AI Copilot Chat Response Feed (sempre visibile nella parte bassa di screenArea)
-    {
-        auto chatBox = screenArea.toNearestInt().withTrimmedTop(screenArea.toNearestInt().getHeight() - 56).reduced(8, 4);
-        g.setColour(juce::Colour::fromFloatRGBA(0.03f, 0.05f, 0.08f, 0.88f));
-        g.fillRoundedRectangle(chatBox.toFloat(), 5.0f);
-        g.setColour(juce::Colour::fromFloatRGBA(0.22f, 0.74f, 0.97f, 0.32f));
-        g.drawRoundedRectangle(chatBox.toFloat(), 5.0f, 1.0f);
-
-        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-        if (audioProcessor.chatHistory.empty())
-        {
-            g.setColour(juce::Colour(0xff94a3b8));
-            g.drawText("AI COPILOT: Pronto. Scrivi un comando e premi un tasto...", chatBox.reduced(8, 2), juce::Justification::centredLeft, true);
-        }
-        else
-        {
-            int rowH = chatBox.getHeight() / static_cast<int>(audioProcessor.chatHistory.size());
-            for (size_t i = 0; i < audioProcessor.chatHistory.size(); ++i)
-            {
-                const auto& entry = audioProcessor.chatHistory[i];
-                auto rowRect = chatBox.withY(chatBox.getY() + static_cast<int>(i) * rowH).withHeight(rowH).reduced(8, 0);
-                g.setColour(entry.isError ? juce::Colour(0xfff87171) : juce::Colour(0xff38bdf8));
-                juce::String prefix = entry.isError ? "AI [ERRORE]: " : (entry.text.startsWith("TU: ") ? "" : "AI COPILOT: ");
-                g.drawText(prefix + entry.text, rowRect, juce::Justification::centredLeft, true);
-            }
-        }
-    }
+    // AI Copilot Chat rendered by scrollable chatDisplayBox
 
     juce::Rectangle<float> stemsBox(576.0f, 152.0f, 280.0f, 245.0f);
     g.setColour(juce::Colour(0xff090c10));
@@ -380,6 +385,7 @@ void NeuralLabAudioProcessorEditor::resized() {
     promptRow.removeFromRight(8);
     askChatBtn.setBounds(promptRow.removeFromRight(112));
     promptRow.removeFromRight(6);
+    chatDisplayBox.setBounds(32, 317, 524, 76);
     promptInput.setBounds(promptRow);
 
     addFolderBtn.setBounds(30, 112, 128, 26);
