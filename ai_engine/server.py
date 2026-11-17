@@ -10,6 +10,7 @@ import traceback
 import urllib.request
 import numpy as np
 from pythonosc import dispatcher, osc_server, udp_client
+vst_client.send_message('/neural_lab/status', ['LOADING NEURAL MODELS...'])
 
 try:
     from install_ableton_osc import ensure_ableton_osc_installed
@@ -22,7 +23,6 @@ from audio_indexer import SampleLibraryIndexer
 from auto_master import NeuralMixMasterEngine
 from midi_composer import NeuralMidiComposer
 
-vst_client = udp_client.SimpleUDPClient('127.0.0.1', 9002)
 ableton_client = udp_client.SimpleUDPClient('127.0.0.1', 11000)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -511,6 +511,12 @@ if __name__ == '__main__':
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
     disp.map('/neural_lab/audition_stem', handle_audition_stem)
     disp.map('/neural_lab/lock_stem', handle_lock_stem)
+    def handle_ping(address, *args):
+        enabled = is_mcp_enabled()
+        vst_client.send_message('/neural_lab/mcp_state', [1 if enabled else 0])
+        send_status('NEURAL-LAB ENGINE: ONLINE')
+
+    disp.map('/neural_lab/ping', handle_ping)
     disp.map('/neural_lab/set_mcp_enabled', handle_set_mcp_enabled)
     def init_mcp_on_boot():
         time.sleep(1.0)
@@ -522,6 +528,8 @@ if __name__ == '__main__':
             set_mcp_enabled(True)
     threading.Thread(target=init_mcp_on_boot, daemon=True).start()
     disp.map('/neural_lab/ask', handle_ask_chat)
+    osc_server.ThreadingOSCUDPServer.allow_reuse_address = True
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
+    send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()

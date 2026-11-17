@@ -11,6 +11,7 @@ NeuralLabAudioProcessor::NeuralLabAudioProcessor()
     refFormatManager.registerBasicFormats();
     loadUserConfig();
     launchAIBackendIfNeeded();
+    oscSender.send(juce::OSCMessage("/neural_lab/ping"));
 }
 
 NeuralLabAudioProcessor::~NeuralLabAudioProcessor() { oscReceiver.removeListener(this); }

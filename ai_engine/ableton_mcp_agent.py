@@ -28,13 +28,13 @@ def set_mcp_enabled(enabled: bool):
     except Exception:
         pass
     try:
-        payload = {"model": AGENT_MODEL, "messages": [], "keep_alive": -1 if enabled else 0}
+        payload = {"model": AGENT_MODEL, "keep_alive": -1 if enabled else 0}
         req = urllib.request.Request(
-            OLLAMA_CHAT_URL,
+            "http://127.0.0.1:11434/api/generate",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        urllib.request.urlopen(req, timeout=10.0).read()
+        urllib.request.urlopen(req, timeout=15.0).read()
     except Exception:
         pass
 
