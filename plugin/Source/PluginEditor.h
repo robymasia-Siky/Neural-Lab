@@ -29,9 +29,7 @@ private:
     std::array<juce::TextButton, 4> swapButtons;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
-    juce::Slider lowCutSlider, punchSlider, widthSlider, driveSlider, eqMatchSlider,
-    juce::Label  eqMatchLabel; ceilingSlider;
-    juce::Label lowCutLabel, punchLabel, widthLabel, driveLabel, ceilingLabel;
+    juce::Slider lowCutSlider, punchSlider, widthSlider, driveSlider, eqMatchSlider, ceilingSlider;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     std::unique_ptr<Attachment> lowCutAtt, punchAtt, widthAtt, driveAtt, eqMatchAtt, ceilingAtt;
