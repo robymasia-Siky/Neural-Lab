@@ -50,6 +50,7 @@ public:
     int auditioningStemIndex = -1;
     bool mcpAgentEnabled = true;
     void toggleMcpAgent();
+    void sendOscPing() { oscSender.send(juce::OSCMessage("/neural_lab/ping")); }
     void addSampleFolder(const juce::File& folder);
     void setReferenceTrack(const juce::File& refFile);
     void toggleReferencePlayback();

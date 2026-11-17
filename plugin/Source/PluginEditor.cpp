@@ -176,7 +176,7 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     if (audioProcessor.aiStatusMessage.containsIgnoreCase("STARTING")) {
         if (++pingTickCounter >= 90) {
             pingTickCounter = 0;
-            audioProcessor.oscSender.send(juce::OSCMessage("/neural_lab/ping"));
+            audioProcessor.sendOscPing();
         }
     }
     repaint();
