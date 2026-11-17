@@ -107,14 +107,22 @@ def ensure_ollama_and_model_ready():
         send_chat('Motore NEURAL-LAB avviato in modalita standard.', is_error=True)
 
 orchestrator = NeuralOrchestrator(model_name=CUSTOM_MODEL_NAME, fallback_model='qwen2.5:0.5b')
-for _ in range(30):
-                if SampleLibraryIndexer is not None: break
+class _LazyProxy:
+    def __init__(self, getter):
+        self._getter = getter
+        self._inst = None
+    def __getattr__(self, name):
+        if self._inst is None:
+            for _ in range(40):
+                cls = self._getter()
+                if cls is not None:
+                    self._inst = cls()
+                    break
                 time.sleep(0.5)
-            indexer = SampleLibraryIndexer()
-mix_for _ in range(30):
-                if NeuralMixMasterEngine is not None: break
-                time.sleep(0.5)
-            engine = NeuralMixMasterEngine()
+        return getattr(self._inst, name)
+
+indexer = _LazyProxy(lambda: SampleLibraryIndexer)
+mix_engine = _LazyProxy(lambda: NeuralMixMasterEngine)
 midi_composer = NeuralMidiComposer()
 
 current_reference_profile = None
