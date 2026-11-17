@@ -43,6 +43,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeuralLabAudioProcessor::cre
     params.push_back(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID("width", 1), "Stereo Width", juce::NormalisableRange<float>(0.0f, 2.0f, 0.01f), 1.05f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID("drive", 1), "Input Drive (dB)", juce::NormalisableRange<float>(-12.0f, 12.0f, 0.1f), 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID("ceiling", 1), "Master Ceiling (dB)", juce::NormalisableRange<float>(-6.0f, 0.0f, 0.1f), -0.3f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID("eqmatch", 1), "EQ Match (%)", juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 50.0f));
     return { params.begin(), params.end() };
 }
 
@@ -64,7 +65,7 @@ void NeuralLabAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         apvts.getRawParameterValue("punch")->load(),
         apvts.getRawParameterValue("width")->load(),
         apvts.getRawParameterValue("ceiling")->load(),
-        apvts.getRawParameterValue("drive")->load());
+        apvts.getRawParameterValue("drive")->load(), apvts.getRawParameterValue("eqmatch")->load());
     neuralDSP.process(buffer);
 }
 
@@ -135,7 +136,7 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         if (idx >= 0 && idx < static_cast<int>(selectedStems.size())) selectedStems[idx] = info;
         else selectedStems.push_back(info);
     } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
-        for (int i = 0; i < 64; ++i) referenceEqCurve[i] = message[i].getFloat32();
+        for (int i = 0; i < 64; ++i) referenceEqCurve[i] = message[i].getFloat32(); neuralDSP.setReferenceCurve(referenceEqCurve);
         hasReferenceCurve = true;
     } else if (addr == "/neural_lab/chat" && message.size() >= 1) {
         juce::String msgText = message[0].getString();

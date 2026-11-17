@@ -29,11 +29,11 @@ private:
     std::array<juce::TextButton, 4> swapButtons;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
-    juce::Slider lowCutSlider, punchSlider, widthSlider, driveSlider, ceilingSlider;
+    juce::Slider lowCutSlider, punchSlider, widthSlider, driveSlider, eqMatchSlider, ceilingSlider;
     juce::Label lowCutLabel, punchLabel, widthLabel, driveLabel, ceilingLabel;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    std::unique_ptr<Attachment> lowCutAtt, punchAtt, widthAtt, driveAtt, ceilingAtt;
+    std::unique_ptr<Attachment> lowCutAtt, punchAtt, widthAtt, driveAtt, eqMatchAtt, ceilingAtt;
 
     std::array<float, NeuralDSP::fftSize / 2> fftMagnitudes {};
     std::array<float, 64> smoothedBands {};

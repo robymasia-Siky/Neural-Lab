@@ -63,12 +63,14 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     setupKnob(lowCutSlider,  lowCutLabel,  "SUB CLEAN",    cyanLed);
     setupKnob(punchSlider,   punchLabel,   "NEURAL PUNCH", amberLed);
     setupKnob(widthSlider,   widthLabel,   "STEREO WIDTH", cyanLed);
+    setupKnob(eqMatchSlider, eqMatchLabel, "EQ MATCH %",   cyanLed);
     setupKnob(ceilingSlider, ceilingLabel, "CEILING",      amberLed);
 
     driveAtt   = std::make_unique<Attachment>(audioProcessor.apvts, "drive",   driveSlider);
     lowCutAtt  = std::make_unique<Attachment>(audioProcessor.apvts, "lowcut",  lowCutSlider);
     punchAtt   = std::make_unique<Attachment>(audioProcessor.apvts, "punch",   punchSlider);
     widthAtt   = std::make_unique<Attachment>(audioProcessor.apvts, "width",   widthSlider);
+    eqMatchAtt = std::make_unique<Attachment>(audioProcessor.apvts, "eqmatch", eqMatchSlider);
     ceilingAtt = std::make_unique<Attachment>(audioProcessor.apvts, "ceiling", ceilingSlider);
 
     splashProgress = 0.0f;
@@ -315,7 +317,7 @@ void NeuralLabAudioProcessorEditor::resized() {
     for (int i = 0; i < 4; ++i) swapButtons[i].setBounds(794, 200 + i * 50, 48, 26);
 
     auto knobRack = getLocalBounds().removeFromBottom(182).reduced(48, 12);
-    int colWidth = knobRack.getWidth() / 5;
+    int colWidth = knobRack.getWidth() / 6;
     auto placeKnob = [&](juce::Slider& s, juce::Label& l, int idx) {
         auto col = knobRack.withX(knobRack.getX() + idx * colWidth).withWidth(colWidth);
         l.setBounds(col.removeFromTop(20));
@@ -325,5 +327,6 @@ void NeuralLabAudioProcessorEditor::resized() {
     placeKnob(lowCutSlider,  lowCutLabel,  1);
     placeKnob(punchSlider,   punchLabel,   2);
     placeKnob(widthSlider,   widthLabel,   3);
-    placeKnob(ceilingSlider, ceilingLabel, 4);
+    placeKnob(eqMatchSlider, eqMatchLabel, 4);
+    placeKnob(ceilingSlider, ceilingLabel, 5);
 }
