@@ -13,7 +13,7 @@ public:
 
 private:
     void timerCallback() override;
-    void setupKnob(juce::Slider lowCutSlider, punchSlider, widthSlider, driveSlider, eqMatchSlider, ceilingSlider;
+    void setupKnob(juce::Slider& slider, juce::Label& label, const juce::String& text, juce::Colour ledColour);
 
     NeuralLabAudioProcessor& audioProcessor;
     DarkHardwareLookAndFeel darkLookAndFeel;
