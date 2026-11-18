@@ -229,6 +229,16 @@ void NeuralLabAudioProcessor::applySuggestedDspPreset() {
     chatHistory.push_back({ "DSP APPLIED [" + suggestedDsp.name + "]: Drive " + juce::String(suggestedDsp.drive, 1) + "dB, Sub " + juce::String(static_cast<int>(suggestedDsp.lowcut)) + "Hz, Punch " + juce::String(static_cast<int>(suggestedDsp.punch * 100)) + "%, Width " + juce::String(static_cast<int>(suggestedDsp.width * 100)) + "%", false });
     if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin());
     chatDirty = true;
+    juce::OSCMessage appliedMsg("/neural_lab/dsp_applied");
+    appliedMsg.addString(suggestedDsp.name);
+    appliedMsg.addFloat32(suggestedDsp.lowcut);
+    appliedMsg.addFloat32(suggestedDsp.punch);
+    appliedMsg.addFloat32(suggestedDsp.width);
+    appliedMsg.addFloat32(suggestedDsp.drive);
+    appliedMsg.addFloat32(suggestedDsp.ceiling);
+    appliedMsg.addString(referenceTrackName);
+    oscSender.send(appliedMsg);
+
     suggestedDsp.hasSuggestion = false;
 }
 void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message) {
@@ -313,6 +323,7 @@ void NeuralLabAudioProcessor::setStateInformation(const void* data, int sizeInBy
 
 juce::AudioProcessorEditor* NeuralLabAudioProcessor::createEditor() { return new NeuralLabAudioProcessorEditor(*this); }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeuralLabAudioProcessor(); }
+
 
 
 

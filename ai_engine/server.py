@@ -671,12 +671,31 @@ if __name__ == '__main__':
         if enabled:
             set_mcp_enabled(True)
     threading.Thread(target=init_mcp_on_boot, daemon=True).start()
+    def handle_dsp_applied(address, *args):
+    try:
+        if len(args) >= 6:
+            preset_name = str(args[0])
+            dsp_vals = {
+                'lowcut': round(float(args[1]), 1),
+                'punch': round(float(args[2]), 2),
+                'width': round(float(args[3]), 2),
+                'drive': round(float(args[4]), 1),
+                'ceiling': round(float(args[5]), 1),
+            }
+            ref_name = str(args[6]) if len(args) >= 7 else ''
+            genre = active_session_state.get('genre', 'electronic')
+            taste_memory.record_decision(genre, ref_name, dsp_vals, f"user_approved:{preset_name}")
+            print(f"[TASTE MEMORY] Saved approved preset: {preset_name} -> {dsp_vals}", flush=True)
+    except Exception:
+        traceback.print_exc()
+    disp.map('/neural_lab/dsp_applied', handle_dsp_applied)
     disp.map('/neural_lab/ask', handle_ask_chat)
     osc_server.ThreadingOSCUDPServer.allow_reuse_address = True
     server = osc_server.ThreadingOSCUDPServer(('127.0.0.1', 9001), disp)
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
 
 
 
