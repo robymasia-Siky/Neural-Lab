@@ -354,7 +354,7 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     bool isRefPlaying = audioProcessor.isReferencePlaying();
     playRefBtn.setEnabled(hasRef);
     playRefBtn.setAlpha(hasRef ? 1.0f : 0.45f);
-    playRefBtn.setButtonText(isRefPlaying ? "|| REF" : "> REF");
+    playRefBtn.setButtonText(isRefPlaying ? "|| MATCH" : "> REF");
     playRefBtn.setColour(juce::TextButton::buttonColourId, isRefPlaying ? juce::Colour(0xff78350f) : juce::Colour(0xff1e293b));
 
     if (audioProcessor.aiStatusMessage.containsIgnoreCase("STARTING")) {
@@ -585,10 +585,14 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
         folderText += "  [" + juce::File(audioProcessor.sampleFolders[audioProcessor.sampleFolders.size() - 1]).getFileName() + "]";
     g.drawText(folderText, static_cast<int>(libBar.getX() + 118), static_cast<int>(barY + 7), 310, 24, juce::Justification::centredLeft, true);
 
-    g.setColour(kCyanNeon);
-    g.setFont(juce::FontOptions(10.5f, juce::Font::bold));
-    juce::String lufsStr = (currentLufsDisplay <= -58.0f) ? "-INF LUFS" : (juce::String(currentLufsDisplay, 1) + " LUFS");
-    g.drawText(lufsStr, static_cast<int>(libBar.getRight() - 265), static_cast<int>(barY + 7), 85, 24, juce::Justification::centredRight);
+    float tpDb  = audioProcessor.neuralDSP.getTruePeakDb();
+    float plrDb = audioProcessor.neuralDSP.getPlrDb();
+    g.setColour(tpDb > -0.15f ? juce::Colour(0xffef4444) : kCyanNeon);
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    juce::String lufsStr = (currentLufsDisplay <= -58.0f)
+        ? "-INF LUFS  |  -- dBTP  |  PLR --"
+        : (juce::String(currentLufsDisplay, 1) + " LUFS  |  " + juce::String(tpDb, 1) + " dBTP  |  PLR " + juce::String(plrDb, 1));
+    g.drawText(lufsStr, static_cast<int>(libBar.getRight() - 395), static_cast<int>(barY + 7), 215, 24, juce::Justification::centredRight);
 
     const float botY = libBar.getBottom() + 10.0f;
     const float botH = bounds.getBottom() - botY - margin;
@@ -787,3 +791,4 @@ void NeuralLabAudioProcessorEditor::resized() {
 
     chatDisplayBox.setBounds(copilotInner);
 }
+

@@ -193,7 +193,13 @@ public:
         }
         currentGainReductionDb.store(juce::jlimit(0.0f, 24.0f, grDb));
 
-                // 8. Feed FFT & 8-Band Real-Time Telemetry Analyzer
+                        float blockMaxAbs = 0.0f;
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            blockMaxAbs = juce::jmax(blockMaxAbs, buffer.getMagnitude(ch, 0, numSamples));
+        float blockTpDb = juce::jlimit(-60.0f, 6.0f, juce::Decibels::gainToDecibels(blockMaxAbs));
+        float prevTp = currentTruePeakDb.load();
+        currentTruePeakDb.store(blockTpDb > prevTp ? blockTpDb : (prevTp * 0.92f + blockTpDb * 0.08f));
+        // 8. Feed FFT & 8-Band Real-Time Telemetry Analyzer
         const auto* monoRead = buffer.getReadPointer(0);
         for (int i = 0; i < numSamples; ++i) {
             float s = monoRead[i];
@@ -215,13 +221,20 @@ public:
     float getRMSLevel() const { return currentRms.load(); }
     float getLUFS() const { return currentLufs.load(); }
     float getGainReductionDb() const { return currentGainReductionDb.load(); }
+    float getTruePeakDb() const { return currentTruePeakDb.load(); }
+    float getPlrDb() const {
+        float lufs = currentLufs.load();
+        float tp = currentTruePeakDb.load();
+        if (lufs <= -58.0f) return 0.0f;
+        return juce::jmax(0.0f, tp - lufs);
+    }
     juce::String getTelemetrySummary(float driveDb, float lowCutHz, float punchPct, float widthPct, float matchPct, float ceilingDb, bool hasRef, const juce::String& refName) const {
         float lufs = currentLufs.load();
         float gr   = currentGainReductionDb.load();
         juce::String lufsStr = (lufs <= -58.0f) ? "-INF (Silence/Idle)" : (juce::String(lufs, 1) + " LUFS");
 
         juce::String out;
-        out << "LIVE_AUDIO: " << lufsStr
+        out << "LIVE_AUDIO: " << lufsStr << " | TruePeak=" << juce::String(getTruePeakDb(), 1) << "dBTP | PLR=" << juce::String(getPlrDb(), 1) << "dB"
             << " | Limiter_GR=" << juce::String(gr, 1) << "dB"
             << " | DSP[Drive=" << juce::String(driveDb, 1) << "dB"
             << ", SubCut=" << juce::String(static_cast<int>(lowCutHz)) << "Hz"
@@ -315,6 +328,7 @@ private:
     std::atomic<float> currentRms { 0.0f };
     std::atomic<float> currentLufs { -60.0f };
     std::atomic<float> currentGainReductionDb { 0.0f };
+    std::atomic<float> currentTruePeakDb { -60.0f };
 
     using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>>;
     std::array<StereoIIR, numEqBands> matchEqBands;
@@ -332,4 +346,5 @@ private:
     int fifoIndex = 0;
     std::atomic<bool> nextFFTBlockReady { false };
 };
+
 

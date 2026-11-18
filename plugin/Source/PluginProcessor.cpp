@@ -78,6 +78,22 @@ void NeuralLabAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
             buffer.clear();
             juce::AudioSourceChannelInfo info(&buffer, 0, buffer.getNumSamples());
             refTransportSource.getNextAudioBlock(info);
+
+            if (autoGainMatchRef && lastMixLufsDb > -50.0f) {
+                float refRms = 0.0f;
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    refRms = juce::jmax(refRms, buffer.getRMSLevel(ch, 0, buffer.getNumSamples()));
+                float instRefDb = juce::Decibels::gainToDecibels(juce::jmax(1e-6f, refRms)) - 0.691f;
+                if (instRefDb > -50.0f)
+                    smoothedRefLufsDb = smoothedRefLufsDb * 0.94f + instRefDb * 0.06f;
+                float targetDeltaDb = juce::jlimit(-18.0f, 6.0f, lastMixLufsDb - smoothedRefLufsDb);
+                currentRefGainOffsetDb = currentRefGainOffsetDb * 0.90f + targetDeltaDb * 0.10f;
+                buffer.applyGain(juce::Decibels::decibelsToGain(currentRefGainOffsetDb));
+            }
+        } else {
+            float liveLufs = neuralDSP.getLUFS();
+            if (liveLufs > -50.0f)
+                lastMixLufsDb = lastMixLufsDb * 0.95f + liveLufs * 0.05f;
         }
     }
 }
@@ -323,6 +339,7 @@ void NeuralLabAudioProcessor::setStateInformation(const void* data, int sizeInBy
 
 juce::AudioProcessorEditor* NeuralLabAudioProcessor::createEditor() { return new NeuralLabAudioProcessorEditor(*this); }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeuralLabAudioProcessor(); }
+
 
 
 

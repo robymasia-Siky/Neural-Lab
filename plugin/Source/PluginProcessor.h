@@ -98,6 +98,10 @@ public:
     std::vector<SelectedStemInfo> selectedStems;
     std::array<float, 64> referenceEqCurve {};
     bool hasReferenceCurve = false;
+    bool autoGainMatchRef = true;
+    float lastMixLufsDb = -14.0f;
+    float smoothedRefLufsDb = -14.0f;
+    float currentRefGainOffsetDb = 0.0f;
     PendingDspPreset pendingDspPreset;
     bool hasPendingDspPreset = false;
     void applyPendingDspPreset();
@@ -114,5 +118,6 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NeuralLabAudioProcessor)
 };
+
 
 
