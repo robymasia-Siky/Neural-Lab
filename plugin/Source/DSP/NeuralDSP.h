@@ -396,8 +396,6 @@ private:
     std::atomic<float> currentDeMudReductionDb { 0.0f };
     juce::dsp::IIR::Filter<float> deMudDetectorLow;
     juce::dsp::IIR::Filter<float> deMudDetectorHigh;
-    StereoIIR dynamicDeMudLow;
-    StereoIIR dynamicDeMudHigh;
     float deMudEnvLow = 0.0f;
     float deMudEnvHigh = 0.0f;
     float deMudWideEnv = 0.0f;
@@ -406,6 +404,8 @@ private:
 
     using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>>;
     std::array<StereoIIR, numEqBands> matchEqBands;
+    StereoIIR dynamicDeMudLow;
+    StereoIIR dynamicDeMudHigh;
 
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter;
     juce::dsp::StateVariableTPTFilter<float> sideHighPassFilter;
@@ -420,6 +420,7 @@ private:
     int fifoIndex = 0;
     std::atomic<bool> nextFFTBlockReady { false };
 };
+
 
 
 
