@@ -171,6 +171,16 @@ void NeuralLabAudioProcessor::swapStemAtIndex(int stemIndex) {
 
 
 
+void NeuralLabAudioProcessor::generateStemVariationAtIndex(int stemIndex) {
+    if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size()) || selectedStems[stemIndex].isLocked) return;
+    aiStatusMessage = "RE-IMAGINING " + selectedStems[stemIndex].role.toUpperCase() + "...";
+    juce::OSCMessage msg("/neural_lab/vary_stem");
+    msg.addInt32(stemIndex);
+    msg.addString(selectedStems[stemIndex].role);
+    msg.addString(selectedStems[stemIndex].filePath);
+    oscSender.send(msg);
+}
+
 void NeuralLabAudioProcessor::auditionStemAtIndex(int stemIndex) {
     if (stemIndex < 0 || stemIndex >= static_cast<int>(selectedStems.size())) return;
     bool turnOn = (auditioningStemIndex != stemIndex);
@@ -339,6 +349,7 @@ void NeuralLabAudioProcessor::setStateInformation(const void* data, int sizeInBy
 
 juce::AudioProcessorEditor* NeuralLabAudioProcessor::createEditor() { return new NeuralLabAudioProcessorEditor(*this); }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeuralLabAudioProcessor(); }
+
 
 
 

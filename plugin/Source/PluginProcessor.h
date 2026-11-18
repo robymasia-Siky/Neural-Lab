@@ -67,6 +67,7 @@ public:
     void launchAIBackendIfNeeded();
     void sendPromptToAIEngine(const juce::String& promptText, const juce::String& mode);
     void swapStemAtIndex(int stemIndex);
+    void generateStemVariationAtIndex(int stemIndex);
     void auditionStemAtIndex(int stemIndex);
     void toggleLockStemAtIndex(int stemIndex);
     int auditioningStemIndex = -1;
@@ -118,6 +119,7 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NeuralLabAudioProcessor)
 };
+
 
 
 

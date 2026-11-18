@@ -161,6 +161,11 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
         lockButtons[i].onClick = [this, i] { audioProcessor.toggleLockStemAtIndex(i); repaint(); };
         addChildComponent(lockButtons[i]);
 
+        varButtons[i].setButtonText("VAR");
+        varButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2e1065));
+        varButtons[i].setColour(juce::TextButton::textColourOffId, juce::Colour(0xffc084fc));
+        varButtons[i].onClick = [this, i] { audioProcessor.generateStemVariationAtIndex(i); };
+        addChildComponent(varButtons[i]);
         swapButtons[i].setButtonText("SWAP");
         swapButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
         swapButtons[i].setColour(juce::TextButton::textColourOffId, kCyanNeon);
@@ -286,6 +291,7 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
         bool show = (i < static_cast<int>(audioProcessor.selectedStems.size()) && uiReady);
         auditionButtons[i].setVisible(show);
         lockButtons[i].setVisible(show);
+        varButtons[i].setVisible(show);
         swapButtons[i].setVisible(show);
         if (show) {
             bool isAud = (audioProcessor.auditioningStemIndex == i);
@@ -297,6 +303,8 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
             lockButtons[i].setColour(juce::TextButton::buttonColourId, isLck ? juce::Colour(0xff78350f) : juce::Colour(0xff0f172a));
             lockButtons[i].setColour(juce::TextButton::textColourOffId, isLck ? kAmberNeon : kTextSecondary);
 
+            varButtons[i].setEnabled(!isLck);
+            varButtons[i].setAlpha(isLck ? 0.45f : 1.0f);
             swapButtons[i].setEnabled(!isLck);
             swapButtons[i].setAlpha(isLck ? 0.45f : 1.0f);
         }
@@ -741,9 +749,10 @@ void NeuralLabAudioProcessorEditor::resized() {
         );
 
         int yBtn = botY + 43 + i * 45;
-        auditionButtons[i].setBounds(margin + stemsW - 122, yBtn, 26, 24);
-        lockButtons[i].setBounds    (margin + stemsW - 93,  yBtn, 38, 24);
-        swapButtons[i].setBounds    (margin + stemsW - 52,  yBtn, 40, 24);
+        auditionButtons[i].setBounds(margin + stemsW - 156, yBtn, 24, 24);
+        lockButtons[i].setBounds    (margin + stemsW - 129, yBtn, 36, 24);
+        varButtons[i].setBounds     (margin + stemsW - 90,  yBtn, 34, 24);
+        swapButtons[i].setBounds    (margin + stemsW - 53,  yBtn, 41, 24);
     }
 
     juce::Rectangle<int> knobArea(dspX + 12, botY + 34, dspW - 24, botH - 40);
@@ -791,4 +800,5 @@ void NeuralLabAudioProcessorEditor::resized() {
 
     chatDisplayBox.setBounds(copilotInner);
 }
+
 

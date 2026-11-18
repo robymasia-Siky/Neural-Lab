@@ -1,4 +1,5 @@
-﻿from ableton_mcp_agent import run_ableton_mcp_agent, is_mcp_enabled, set_mcp_enabled
+﻿from sample_variator import create_audio_variation
+from ableton_mcp_agent import run_ableton_mcp_agent, is_mcp_enabled, set_mcp_enabled
 import os
 import sys
 import time
@@ -322,6 +323,43 @@ def handle_lock_stem(address, stem_idx, is_locked):
         active_session_state['stems'][idx]['locked'] = locked
         role = active_session_state['stems'][idx].get('role', f'Track {idx+1}')
         send_chat(f'Stem {role} {"bloccato (LOCKED)" if locked else "sbloccato"}.')
+def handle_vary_stem(address, stem_idx, role, filepath=''):
+    def worker():
+        try:
+            var_key = f"var_{stem_idx}"
+            var_num = active_session_state['swap_offsets'].get(var_key, 0) + 1
+            active_session_state['swap_offsets'][var_key] = var_num
+            key = active_session_state.get('key', 'Fm')
+            bpm = float(active_session_state.get('bpm', 126.0))
+            send_status(f'RE-IMAGINING {role.upper()} (VAR #{var_num})...')
+
+            if 'MIDI' in role.upper() or str(filepath).lower().endswith('.mid'):
+                notes = midi_composer.generate_hypnotic_arp(key, 4) if 'BASS' in role.upper() else midi_composer.generate_rolling_bass(key, 4)
+                clean_role = role.replace('MIDI ', '')
+                new_name = f"{clean_role}_{key}_ReImagine{var_num}.mid"
+                write_midi_clip_to_ableton(stem_idx, 0, new_name, notes, 16.0, create_track=False)
+                ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
+                mid_path = export_midi_to_temp_file(new_name, notes)
+                vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, new_name, 0.99, mid_path])
+                send_status(f'VARIATION {role}: MIDI #{var_num}')
+                send_chat(f'Variante MIDI #{var_num} generata per {role} in {key} (pronta per Drag & Drop).')
+            else:
+                src_path = str(filepath).strip()
+                if (not src_path or not os.path.isfile(src_path)) and stem_idx < len(active_session_state['stems']):
+                    src_path = active_session_state['stems'][stem_idx].get('path', '')
+                out_path, out_name, desc = create_audio_variation(src_path, role, var_num, bpm)
+                if stem_idx < len(active_session_state['stems']):
+                    active_session_state['stems'][stem_idx]['path'] = out_path
+                ableton_client.send_message('/live/clip/set/file_path', [stem_idx, 0, out_path])
+                ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
+                vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, out_name, 0.98, out_path])
+                send_status(f'VAR #{var_num}: {desc.upper()}')
+                send_chat(f'Creata variante audio [{desc}] per {role}: {out_name} (pronta per Drag & Drop).')
+        except Exception as e:
+            traceback.print_exc()
+            send_chat(f'Errore generazione variante: {str(e)[:52]}', is_error=True)
+    threading.Thread(target=worker, daemon=True).start()
+
 def handle_swap_stem(address, stem_idx, role):
     def worker():
         try:
@@ -653,6 +691,7 @@ if __name__ == '__main__':
     disp.map('/neural_lab/add_folder', handle_add_folder)
     disp.map('/neural_lab/set_reference', handle_set_reference)
     disp.map('/neural_lab/swap_stem', handle_swap_stem)
+    disp.map('/neural_lab/vary_stem', handle_vary_stem)
     disp.map('/neural_lab/audition_stem', handle_audition_stem)
     disp.map('/neural_lab/lock_stem', handle_lock_stem)
     def handle_ping(address, *args):
@@ -695,6 +734,7 @@ if __name__ == '__main__':
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
 
 
 

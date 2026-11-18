@@ -41,6 +41,7 @@ private:
     juce::TextButton mcpToggleBtn     { "MCP: ON" };
     std::array<juce::TextButton, 4> auditionButtons;
     std::array<juce::TextButton, 4> lockButtons;
+    std::array<juce::TextButton, 4> varButtons;
     std::array<juce::TextButton, 4> swapButtons;
     std::array<juce::Rectangle<float>, 4> stemRowBounds;
     int hoveredStemIndex = -1;
@@ -64,3 +65,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NeuralLabAudioProcessorEditor)
 };
+
