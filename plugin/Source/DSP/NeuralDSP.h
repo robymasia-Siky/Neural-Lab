@@ -1,9 +1,10 @@
-#pragma once
+﻿#pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <memory>
 
 class NeuralDSP {
 public:
@@ -15,8 +16,17 @@ public:
 
     void prepare(const juce::dsp::ProcessSpec& spec) {
         sampleRate = spec.sampleRate;
+        numPreparedChannels = spec.numChannels;
+
         lowCutFilter.prepare(spec);
         lowCutFilter.setType(juce::dsp::StateVariableTPTFilterType::highpass);
+
+        // Filtro Mono-Maker a 120 Hz sul canale Side (mantiene Sub/Kick 100% mono)
+        juce::dsp::ProcessSpec monoSpec { spec.sampleRate, spec.maximumBlockSize, 1 };
+        sideHighPassFilter.prepare(monoSpec);
+        sideHighPassFilter.setType(juce::dsp::StateVariableTPTFilterType::highpass);
+        sideHighPassFilter.setCutoffFrequency(120.0f);
+        sideHighPassFilter.reset();
 
         for (int b = 0; b < numEqBands; ++b) {
             matchEqBands[b].prepare(spec);
@@ -25,12 +35,22 @@ public:
         updateMatchEqCoefficients(true);
 
         compressor.prepare(spec);
-        limiter.prepare(spec);
-        limiter.setRelease(50.0f);
+
+        // 4x Oversampling (2^2 = 4x) con filtri IIR polifase per saturazione armonica e limiting True-Peak senza aliasing
+        oversampler = std::make_unique<juce::dsp::Oversampling<float>>(
+            spec.numChannels, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true);
+        oversampler->initProcessing(spec.maximumBlockSize);
+
+        juce::dsp::ProcessSpec osSpec {
+            spec.sampleRate * static_cast<double>(oversampler->getOversamplingFactor()),
+            spec.maximumBlockSize * static_cast<juce::uint32>(oversampler->getOversamplingFactor()),
+            spec.numChannels
+        };
+        limiter.prepare(osSpec);
+        limiter.setRelease(45.0f);
     }
 
     void setReferenceCurve(const std::array<float, 64>& curve64) {
-        // Mappa i 64 bin logaritmici in 8 bande EQ target (dB delta rispetto a curva bilanciata 0.50)
         constexpr int binRanges[numEqBands][2] = {
             {0, 6},    // 45 Hz (Sub)
             {6, 13},   // 110 Hz (Bass)
@@ -50,7 +70,6 @@ public:
                 ++count;
             }
             float avgNorm = (count > 0) ? (sum / static_cast<float>(count)) : 0.5f;
-            // Scostamento in dB (range -7.5 dB .. +7.5 dB)
             float deltaDb = juce::jlimit(-7.5f, 7.5f, (avgNorm - 0.50f) * 15.0f);
             targetBandGainsDb[static_cast<size_t>(b)].store(deltaDb);
         }
@@ -67,8 +86,9 @@ public:
             updateMatchEqCoefficients(false);
         }
 
-        compThresholdDb = juce::jmap(punchAmount, 0.0f, 1.0f, 0.0f, -24.0f);
-        compRatio = juce::jmap(punchAmount, 0.0f, 1.0f, 1.0f, 6.0f);
+        currentPunchAmount = juce::jlimit(0.0f, 1.0f, punchAmount);
+        compThresholdDb = juce::jmap(currentPunchAmount, 0.0f, 1.0f, 0.0f, -24.0f);
+        compRatio = juce::jmap(currentPunchAmount, 0.0f, 1.0f, 1.0f, 6.0f);
         compressor.setThreshold(compThresholdDb);
         compressor.setRatio(compRatio);
         compressor.setAttack(12.0f);
@@ -83,6 +103,7 @@ public:
     void process(juce::AudioBuffer<float>& buffer) {
         const int numChannels = buffer.getNumChannels();
         const int numSamples = buffer.getNumSamples();
+        if (numSamples <= 0 || numChannels <= 0) return;
 
         // 1. Input Drive
         buffer.applyGain(inputGainLinear);
@@ -98,7 +119,7 @@ public:
         // 2. Sub Clean High-Pass
         lowCutFilter.process(context);
 
-        // 3. 8-Band Auto-EQ Matchering (attivo quando e' caricata una reference e Match > 0%)
+        // 3. 8-Band Auto-EQ Matchering
         if (hasReferenceData.load() && lastMatchPercent > 0.5f) {
             for (int b = 0; b < numEqBands; ++b) {
                 matchEqBands[b].process(context);
@@ -108,20 +129,42 @@ public:
         // 4. Punch Compressor
         compressor.process(context);
 
-        // 5. Mid/Side Stereo Width
+        // 5. Mid/Side Stereo Width con Club Mono-Maker (< 120 Hz in mono puro)
         if (numChannels >= 2) {
             auto* left = buffer.getWritePointer(0);
             auto* right = buffer.getWritePointer(1);
             for (int i = 0; i < numSamples; ++i) {
                 float mid = 0.5f * (left[i] + right[i]);
-                float side = 0.5f * (left[i] - right[i]) * stereoWidth;
-                left[i] = mid + side;
-                right[i] = mid - side;
+                float rawSide = 0.5f * (left[i] - right[i]);
+                // Filtra via il sub dal canale Side così tutto sotto 120 Hz resta centrato in mono
+                float cleanSide = sideHighPassFilter.processSample(0, rawSide) * stereoWidth;
+                left[i] = mid + cleanSide;
+                right[i] = mid - cleanSide;
             }
         }
 
-        // 6. True-Peak Limiter
-        limiter.process(context);
+        // 6. 4x Oversampled Analog Soft-Clipper + True-Peak Limiter
+        if (oversampler != nullptr) {
+            auto osBlock = oversampler->processSamplesUp(block);
+            const size_t osChannels = osBlock.getNumChannels();
+            const size_t osSamples = osBlock.getNumSamples();
+
+            // Saturazione morbida proporzionale al Neural Punch (calore armonico senza aliasing)
+            const float satDrive = 1.0f + currentPunchAmount * 0.65f;
+            const float satNorm = 1.0f / std::tanh(satDrive);
+            for (size_t ch = 0; ch < osChannels; ++ch) {
+                auto* data = osBlock.getChannelPointer(ch);
+                for (size_t i = 0; i < osSamples; ++i) {
+                    data[i] = std::tanh(data[i] * satDrive) * satNorm;
+                }
+            }
+
+            juce::dsp::ProcessContextReplacing<float> osContext(osBlock);
+            limiter.process(osContext);
+            oversampler->processSamplesDown(block);
+        } else {
+            limiter.process(context);
+        }
 
         // 7. Output RMS, LUFS e Gain Reduction
         float sumSq = 0.0f;
@@ -197,8 +240,10 @@ private:
     }
 
     double sampleRate = 44100.0;
+    juce::uint32 numPreparedChannels = 2;
     float stereoWidth = 1.0f;
     float inputGainLinear = 1.0f;
+    float currentPunchAmount = 0.35f;
     float compThresholdDb = -12.0f;
     float compRatio = 3.0f;
     float limiterCeilingDb = -0.3f;
@@ -216,7 +261,9 @@ private:
     std::array<StereoIIR, numEqBands> matchEqBands;
 
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter;
+    juce::dsp::StateVariableTPTFilter<float> sideHighPassFilter;
     juce::dsp::Compressor<float> compressor;
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     juce::dsp::Limiter<float> limiter;
 
     juce::dsp::FFT forwardFFT;

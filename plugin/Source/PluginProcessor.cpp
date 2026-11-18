@@ -1,4 +1,4 @@
-#include "PluginProcessor.h"
+﻿#include "PluginProcessor.h"
 #include "PluginEditor.h"
 
 NeuralLabAudioProcessor::NeuralLabAudioProcessor()
@@ -180,12 +180,14 @@ void NeuralLabAudioProcessor::toggleMcpAgent() {
     msg.addInt32(mcpAgentEnabled ? 1 : 0);
     oscSender.send(msg);
 }
-void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) { if (question.trim().isNotEmpty()) { chatHistory.push_back({ "YOU: " + question.trim(), false }); if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true; }
-    if (question.trim().isEmpty()) return;
-    chatHistory.push_back({ "TU: " + question.trim(), false });
-    if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true;
+void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
+    auto trimmed = question.trim();
+    if (trimmed.isEmpty()) return;
+    chatHistory.push_back({ "YOU: " + trimmed, false });
+    if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin());
+    chatDirty = true;
     juce::OSCMessage msg("/neural_lab/ask");
-    msg.addString(question.trim());
+    msg.addString(trimmed);
     oscSender.send(msg);
 }
 void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message) {
