@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -6,12 +6,34 @@
 #include <array>
 #include "DSP/NeuralDSP.h"
 
+struct PendingDspPreset {
+    juce::String name;
+    float lowcut = 30.0f;
+    float punch = 0.35f;
+    float width = 1.05f;
+    float drive = 0.0f;
+    float eqmatch = 50.0f;
+    float ceiling = -0.3f;
+};
+
 struct SelectedStemInfo {
     int trackIndex = 0;
     juce::String role;
     juce::String filename;
     float similarity = 0.0f;
     bool isLocked = false;
+    juce::String filePath;
+};
+
+struct SuggestedDspPreset {
+    bool hasSuggestion = false;
+    juce::String name;
+    float lowcut  = 30.0f;
+    float punch   = 0.35f;
+    float width   = 1.05f;
+    float drive   = 0.0f;
+    float ceiling = -0.3f;
+    float eqmatch = 50.0f;
 };
 
 class NeuralLabAudioProcessor : public juce::AudioProcessor,
@@ -61,8 +83,11 @@ public:
 
     struct ChatLine { juce::String text; bool isError; };
     std::vector<ChatLine> chatHistory;
+    bool chatDirty = true;
     juce::String aiStatusMessage { "NEURAL-LAB: STARTING..." };
     void sendChatQuestion(const juce::String& question);
+    SuggestedDspPreset suggestedDsp;
+    void applySuggestedDspPreset();
     juce::StringArray sampleFolders;
     juce::String referenceTrackPath;
     juce::AudioFormatManager refFormatManager;
@@ -73,6 +98,10 @@ public:
     std::vector<SelectedStemInfo> selectedStems;
     std::array<float, 64> referenceEqCurve {};
     bool hasReferenceCurve = false;
+    PendingDspPreset pendingDspPreset;
+    bool hasPendingDspPreset = false;
+    void applyPendingDspPreset();
+    void dismissPendingDspPreset() { hasPendingDspPreset = false; }
 
 private:
     void oscMessageReceived(const juce::OSCMessage& message) override;
@@ -85,3 +114,5 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NeuralLabAudioProcessor)
 };
+
+

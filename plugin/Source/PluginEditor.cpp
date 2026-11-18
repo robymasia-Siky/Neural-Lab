@@ -98,6 +98,16 @@ NeuralLabAudioProcessorEditor::NeuralLabAudioProcessorEditor(NeuralLabAudioProce
     autoMasterBtn.onClick = [this] { audioProcessor.sendPromptToAIEngine(promptInput.getText(), "auto_master"); };
     addAndMakeVisible(autoMasterBtn);
 
+    applyDspBtn.setButtonText("APPLY DSP PRESET");
+    applyDspBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff422006));
+    applyDspBtn.setColour(juce::TextButton::textColourOffId, kAmberNeon);
+    applyDspBtn.onClick = [this] {
+        audioProcessor.applySuggestedDspPreset();
+        resized();
+        repaint();
+    };
+    addChildComponent(applyDspBtn);
+
     mcpToggleBtn.setButtonText("MCP: ON");
     mcpToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff064e3b));
     mcpToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff34d399));
@@ -196,6 +206,62 @@ void NeuralLabAudioProcessorEditor::setupKnob(juce::Slider& slider, juce::Label&
     addAndMakeVisible(label);
 }
 
+int NeuralLabAudioProcessorEditor::getStemRowAtPoint(juce::Point<int> pos) const {
+    if (splashProgress < 0.92f) return -1;
+    const auto p = pos.toFloat();
+    const int count = juce::jmin(4, static_cast<int>(audioProcessor.selectedStems.size()));
+    for (int i = 0; i < count; ++i) {
+        if (stemRowBounds[static_cast<size_t>(i)].contains(p)) {
+            if (audioProcessor.selectedStems[static_cast<size_t>(i)].filePath.isNotEmpty())
+                return i;
+        }
+    }
+    return -1;
+}
+
+void NeuralLabAudioProcessorEditor::mouseMove(const juce::MouseEvent& event) {
+    int idx = getStemRowAtPoint(event.getPosition());
+    if (idx != hoveredStemIndex) {
+        hoveredStemIndex = idx;
+        setMouseCursor(idx >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void NeuralLabAudioProcessorEditor::mouseExit(const juce::MouseEvent&) {
+    if (hoveredStemIndex != -1) {
+        hoveredStemIndex = -1;
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void NeuralLabAudioProcessorEditor::mouseDown(const juce::MouseEvent& event) {
+    draggingStemIndex = getStemRowAtPoint(event.getPosition());
+    externalDragTriggered = false;
+}
+
+void NeuralLabAudioProcessorEditor::mouseDrag(const juce::MouseEvent& event) {
+    if (draggingStemIndex < 0 || externalDragTriggered) return;
+    if (event.getDistanceFromDragStart() < 6) return;
+
+    if (draggingStemIndex < static_cast<int>(audioProcessor.selectedStems.size())) {
+        const auto& stem = audioProcessor.selectedStems[static_cast<size_t>(draggingStemIndex)];
+        juce::File targetFile(stem.filePath);
+        if (targetFile.existsAsFile()) {
+            externalDragTriggered = true;
+            juce::StringArray files;
+            files.add(targetFile.getFullPathName());
+            performExternalDragDropOfFiles(files, false, this);
+        }
+    }
+}
+
+void NeuralLabAudioProcessorEditor::mouseUp(const juce::MouseEvent&) {
+    draggingStemIndex = -1;
+    externalDragTriggered = false;
+}
+
 void NeuralLabAudioProcessorEditor::timerCallback() {
     if (audioProcessor.neuralDSP.getNextFFTBlock(fftMagnitudes)) {
         for (size_t i = 0; i < smoothedBands.size(); ++i) {
@@ -246,6 +312,15 @@ void NeuralLabAudioProcessorEditor::timerCallback() {
     generateTrackBtn.setVisible(uiReady);
     arrangeFullBtn.setVisible(uiReady);
     autoMasterBtn.setVisible(uiReady);
+
+    bool showApplyDsp = (uiReady && audioProcessor.suggestedDsp.hasSuggestion);
+    if (applyDspBtn.isVisible() != showApplyDsp) {
+        applyDspBtn.setVisible(showApplyDsp);
+        resized();
+    }
+    if (showApplyDsp) {
+        applyDspBtn.setButtonText("APPLY DSP: " + audioProcessor.suggestedDsp.name);
+    }
 
     if (audioProcessor.mcpAgentEnabled) {
         mcpToggleBtn.setButtonText("MCP: ON");
@@ -525,7 +600,12 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
 
     g.setColour(kCyanNeon);
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText("AI STEMS & MIDI", static_cast<int>(stemsCard.getX() + 14), static_cast<int>(stemsCard.getY() + 8), 180, 18, juce::Justification::centredLeft);
+    g.drawText("AI STEMS & MIDI", static_cast<int>(stemsCard.getX() + 14), static_cast<int>(stemsCard.getY() + 8), 140, 18, juce::Justification::centredLeft);
+
+    g.setColour(kTextMuted);
+    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    g.drawText("DRAG TO ABLETON", static_cast<int>(stemsCard.getRight() - 125), static_cast<int>(stemsCard.getY() + 8), 112, 18, juce::Justification::centredRight);
+
     g.setColour(kGlassBorder);
     g.drawLine(stemsCard.getX() + 12.0f, stemsCard.getY() + 30.0f, stemsCard.getRight() - 12.0f, stemsCard.getY() + 30.0f, 1.0f);
 
@@ -539,20 +619,30 @@ void NeuralLabAudioProcessorEditor::paint(juce::Graphics& g) {
         int yRow = static_cast<int>(stemsCard.getY() + 36);
         for (size_t idx = 0; idx < audioProcessor.selectedStems.size() && idx < 4; ++idx) {
             const auto& stem = audioProcessor.selectedStems[idx];
+            bool isHovered = (static_cast<int>(idx) == hoveredStemIndex);
+            bool canDrag = stem.filePath.isNotEmpty();
+
             juce::Rectangle<float> rowRect(stemsCard.getX() + 10.0f, static_cast<float>(yRow), stemsCard.getWidth() - 20.0f, 40.0f);
-            g.setColour(juce::Colour(0xff0c121e));
+            g.setColour(isHovered ? juce::Colour(0xff131e32) : juce::Colour(0xff0c121e));
             g.fillRoundedRectangle(rowRect, 6.0f);
-            g.setColour(juce::Colour(0xff1b263b));
-            g.drawRoundedRectangle(rowRect, 6.0f, 1.0f);
+            g.setColour(isHovered ? kCyanNeon.withAlpha(0.8f) : juce::Colour(0xff1b263b));
+            g.drawRoundedRectangle(rowRect, 6.0f, isHovered ? 1.3f : 1.0f);
+
+            g.setColour(canDrag ? (isHovered ? kCyanNeon : kTextMuted) : kTextMuted.withAlpha(0.3f));
+            for (int dotR = 0; dotR < 3; ++dotR) {
+                float dy = rowRect.getY() + 12.0f + dotR * 6.0f;
+                g.fillEllipse(rowRect.getX() + 6.0f, dy, 2.2f, 2.2f);
+                g.fillEllipse(rowRect.getX() + 10.0f, dy, 2.2f, 2.2f);
+            }
 
             g.setColour(kAmberNeon);
             g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
             g.drawText(stem.role.toUpperCase() + " [" + juce::String(static_cast<int>(stem.similarity * 100)) + "%]",
-                       static_cast<int>(rowRect.getX() + 8), yRow + 4, 140, 13, juce::Justification::centredLeft);
+                       static_cast<int>(rowRect.getX() + 17), yRow + 4, 132, 13, juce::Justification::centredLeft);
 
             g.setColour(kTextPrimary);
             g.setFont(juce::FontOptions(10.5f));
-            g.drawText(stem.filename, static_cast<int>(rowRect.getX() + 8), yRow + 18, 140, 16, juce::Justification::centredLeft, true);
+            g.drawText(stem.filename, static_cast<int>(rowRect.getX() + 17), yRow + 18, 132, 16, juce::Justification::centredLeft, true);
             yRow += 45;
         }
     }
@@ -638,6 +728,14 @@ void NeuralLabAudioProcessorEditor::resized() {
     const int dspW = leftColW - stemsW - 10;
 
     for (int i = 0; i < 4; ++i) {
+        int yRow = botY + 36 + i * 45;
+        stemRowBounds[static_cast<size_t>(i)] = juce::Rectangle<float>(
+            static_cast<float>(margin + 10),
+            static_cast<float>(yRow),
+            static_cast<float>(stemsW - 135),
+            40.0f
+        );
+
         int yBtn = botY + 43 + i * 45;
         auditionButtons[i].setBounds(margin + stemsW - 122, yBtn, 26, 24);
         lockButtons[i].setBounds    (margin + stemsW - 93,  yBtn, 38, 24);
@@ -681,6 +779,11 @@ void NeuralLabAudioProcessorEditor::resized() {
     autoMasterBtn.setBounds(quickRow);
 
     copilotInner.removeFromBottom(8);
+
+    if (audioProcessor.suggestedDsp.hasSuggestion) {
+        applyDspBtn.setBounds(copilotInner.removeFromBottom(28));
+        copilotInner.removeFromBottom(6);
+    }
 
     chatDisplayBox.setBounds(copilotInner);
 }

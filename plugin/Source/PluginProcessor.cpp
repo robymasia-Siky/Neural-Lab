@@ -174,6 +174,22 @@ void NeuralLabAudioProcessor::toggleLockStemAtIndex(int stemIndex) {
     oscSender.send(msg);
 }
 
+void NeuralLabAudioProcessor::applyPendingDspPreset() {
+    if (!hasPendingDspPreset) return;
+    auto setParam = [this](const juce::String& id, float val) {
+        if (auto* p = apvts.getParameter(id))
+            p->setValueNotifyingHost(p->convertTo0to1(val));
+    };
+    setParam("lowcut",  pendingDspPreset.lowcut);
+    setParam("punch",   pendingDspPreset.punch);
+    setParam("width",   pendingDspPreset.width);
+    setParam("drive",   pendingDspPreset.drive);
+    setParam("eqmatch", pendingDspPreset.eqmatch);
+    setParam("ceiling", pendingDspPreset.ceiling);
+    aiStatusMessage = "DSP APPLIED: " + pendingDspPreset.name;
+    hasPendingDspPreset = false;
+}
+
 void NeuralLabAudioProcessor::toggleMcpAgent() {
     mcpAgentEnabled = !mcpAgentEnabled;
     juce::OSCMessage msg("/neural_lab/set_mcp_enabled");
@@ -190,6 +206,20 @@ void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
     msg.addString(trimmed);
     oscSender.send(msg);
 }
+void NeuralLabAudioProcessor::applySuggestedDspPreset() {
+    if (!suggestedDsp.hasSuggestion) return;
+    if (auto* p = apvts.getParameter("lowcut"))  p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.lowcut));
+    if (auto* p = apvts.getParameter("punch"))   p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.punch));
+    if (auto* p = apvts.getParameter("width"))   p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.width));
+    if (auto* p = apvts.getParameter("drive"))   p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.drive));
+    if (auto* p = apvts.getParameter("ceiling")) p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.ceiling));
+    if (auto* p = apvts.getParameter("eqmatch")) p->setValueNotifyingHost(p->convertTo0to1(suggestedDsp.eqmatch));
+
+    chatHistory.push_back({ "DSP APPLIED [" + suggestedDsp.name + "]: Drive " + juce::String(suggestedDsp.drive, 1) + "dB, Sub " + juce::String(static_cast<int>(suggestedDsp.lowcut)) + "Hz, Punch " + juce::String(static_cast<int>(suggestedDsp.punch * 100)) + "%, Width " + juce::String(static_cast<int>(suggestedDsp.width * 100)) + "%", false });
+    if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin());
+    chatDirty = true;
+    suggestedDsp.hasSuggestion = false;
+}
 void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message) {
     auto addr = message.getAddressPattern().toString();
     if (addr == "/neural_lab/set_dsp" && message.size() >= 5) {
@@ -205,6 +235,7 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         info.role = message[1].getString();
         info.filename = message[2].getString();
         info.similarity = message[3].getFloat32();
+        if (message.size() >= 5 && message[4].isString()) info.filePath = message[4].getString();
         if (idx >= 0 && idx < static_cast<int>(selectedStems.size())) { info.isLocked = selectedStems[idx].isLocked; selectedStems[idx] = info; }
         else selectedStems.push_back(info);
     } else if (addr == "/neural_lab/mcp_state" && message.size() >= 1) { mcpAgentEnabled = (message[0].getInt32() != 0); } else if (addr == "/neural_lab/ref_curve" && message.size() >= 64) {
@@ -215,6 +246,24 @@ void NeuralLabAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         bool isErr = (message.size() >= 2 && message[1].isInt32()) ? (message[1].getInt32() != 0) : false;
         chatHistory.push_back({ msgText, isErr });
         if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin()); chatDirty = true;
+    } else if (addr == "/neural_lab/suggest_dsp" && message.size() >= 7) {
+        suggestedDsp.name = message[0].getString();
+        suggestedDsp.lowcut = message[1].getFloat32();
+        suggestedDsp.punch = message[2].getFloat32();
+        suggestedDsp.width = message[3].getFloat32();
+        suggestedDsp.drive = message[4].getFloat32();
+        suggestedDsp.ceiling = message[5].getFloat32();
+        suggestedDsp.eqmatch = message[6].getFloat32();
+        suggestedDsp.hasSuggestion = true;
+    } else if (addr == "/neural_lab/dsp_suggestion" && message.size() >= 7) {
+        pendingDspPreset.name    = message[0].getString();
+        pendingDspPreset.lowcut  = message[1].getFloat32();
+        pendingDspPreset.punch   = message[2].getFloat32();
+        pendingDspPreset.width   = message[3].getFloat32();
+        pendingDspPreset.drive   = message[4].getFloat32();
+        pendingDspPreset.eqmatch = message[5].getFloat32();
+        pendingDspPreset.ceiling = message[6].getFloat32();
+        hasPendingDspPreset = true;
     } else if (addr == "/neural_lab/status" && message.size() >= 1) {
         aiStatusMessage = message[0].getString();
     }
@@ -253,3 +302,6 @@ void NeuralLabAudioProcessor::setStateInformation(const void* data, int sizeInBy
 
 juce::AudioProcessorEditor* NeuralLabAudioProcessor::createEditor() { return new NeuralLabAudioProcessorEditor(*this); }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeuralLabAudioProcessor(); }
+
+
+

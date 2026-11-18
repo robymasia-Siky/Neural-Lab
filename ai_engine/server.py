@@ -1,4 +1,4 @@
-from ableton_mcp_agent import run_ableton_mcp_agent, is_mcp_enabled, set_mcp_enabled
+﻿from ableton_mcp_agent import run_ableton_mcp_agent, is_mcp_enabled, set_mcp_enabled
 import os
 import sys
 import time
@@ -7,6 +7,43 @@ import socket
 import subprocess
 import threading
 import traceback
+import struct, tempfile
+
+def export_midi_to_temp_file(filename, notes, bpm=126):
+    try:
+        out_dir = os.path.join(tempfile.gettempdir(), 'NeuralLab_Stems')
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+        tpq = 480
+        tempo_us = int(60_000_000 / max(40, int(bpm)))
+        events = []
+        events.append((0, b'\xFF\x51\x03' + tempo_us.to_bytes(3, 'big')))
+        for n in notes:
+            pitch = max(0, min(127, int(n.get('pitch', 60))))
+            vel = max(1, min(127, int(n.get('velocity', 100))))
+            start_tick = max(0, int(round(float(n.get('start_time', 0.0)) * tpq)))
+            dur_tick = max(1, int(round(float(n.get('duration', 0.25)) * tpq)))
+            events.append((start_tick, bytes([0x90, pitch, vel])))
+            events.append((start_tick + dur_tick, bytes([0x80, pitch, 0])))
+        events.sort(key=lambda x: (x[0], 0 if x[1][0] == 0x80 else 1))
+        track_data = bytearray()
+        last_tick = 0
+        for tick, msg in events:
+            delta = max(0, tick - last_tick)
+            last_tick = tick
+            buf = [delta & 0x7F]
+            while delta >>= 7:
+                buf.append((delta & 0x7F) | 0x80)
+            track_data.extend(reversed(buf))
+            track_data.extend(msg)
+        track_data.extend(b'\x00\xFF\x2F\x00')
+        header = b'MThd' + struct.pack('>IHHH', 6, 0, 1, tpq)
+        track = b'MTrk' + struct.pack('>I', len(track_data)) + bytes(track_data)
+        with open(out_path, 'wb') as f:
+            f.write(header + track)
+        return out_path
+    except Exception:
+        return ''
 import urllib.request
 import numpy as np
 from pythonosc import dispatcher, osc_server, udp_client
@@ -294,7 +331,8 @@ def handle_swap_stem(address, stem_idx, role):
                 new_name = f"{clean_role}_{key}_Var{offset}.mid"
                 write_midi_clip_to_ableton(stem_idx, 0, new_name, notes, 16.0, create_track=False)
                 ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
-                vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, new_name, 0.99])
+                mid_path = export_midi_to_temp_file(new_name, notes)
+                vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, new_name, 0.99, mid_path])
                 send_status(f'SWAPPED {role}: VAR #{offset}')
                 send_chat(f'Nuova variazione MIDI generata per {role} (#{offset}).')
             else:
@@ -304,7 +342,7 @@ def handle_swap_stem(address, stem_idx, role):
                     sample = matches[offset]
                     ableton_client.send_message('/live/clip/set/file_path', [stem_idx, 0, sample['path']])
                     ableton_client.send_message('/live/clip/fire', [stem_idx, 0])
-                    vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, sample['filename'], float(sample['similarity'])])
+                    vst_client.send_message('/neural_lab/stem_selected', [stem_idx, role, sample['filename'], float(sample['similarity']), sample['path']])
                     send_status(f"SWAPPED {role}")
                     send_chat(f"Stem {role} sostituito con {sample['filename']}.")
                 else:
@@ -373,7 +411,7 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                             track_cursor += 1
                         else:
                             active_session_state['stems'][target_idx] = stem_obj
-                        vst_client.send_message('/neural_lab/stem_selected', [target_idx, q['role'], s['filename'], float(s['similarity'])])
+                        vst_client.send_message('/neural_lab/stem_selected', [target_idx, q['role'], s['filename'], float(s['similarity']), s['path']])
                         ableton_client.send_message('/live/clip_slot/create_clip', [target_idx, 0, 16.0])
                         ableton_client.send_message('/live/clip/set/file_path', [target_idx, 0, s['path']])
                         ableton_client.send_message('/live/clip/fire', [target_idx, 0])
@@ -394,7 +432,9 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                         track_cursor += 1
                     else:
                         active_session_state['stems'][b_idx] = b_obj
-                    vst_client.send_message('/neural_lab/stem_selected', [b_idx, 'MIDI BASS', f'Rolling_{key}_Vel.mid', 0.99])
+                    b_mid_name = f'Rolling_{key}_Vel.mid'
+                    b_mid_path = export_midi_to_temp_file(b_mid_name, bass_notes, bpm)
+                    vst_client.send_message('/neural_lab/stem_selected', [b_idx, 'MIDI BASS', b_mid_name, 0.99, b_mid_path])
 
                 if 'MIDI ARP' not in locked_roles:
                     existing_arp = next((i for i, st in enumerate(active_session_state['stems']) if st['role'] == 'MIDI ARP' and not st.get('locked')), None)
@@ -409,7 +449,9 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                         track_cursor += 1
                     else:
                         active_session_state['stems'][a_idx] = a_obj
-                    vst_client.send_message('/neural_lab/stem_selected', [a_idx, 'MIDI ARP', f'Hypnotic_{key}_Auto.mid', 0.99])
+                    a_mid_name = f'Hypnotic_{key}_Auto.mid'
+                    a_mid_path = export_midi_to_temp_file(a_mid_name, arp_notes, bpm)
+                    vst_client.send_message('/neural_lab/stem_selected', [a_idx, 'MIDI ARP', a_mid_name, 0.99, a_mid_path])
 
                 if mode == 'arrange_full':
                     send_status('BUILDING 6-SCENE ARRANGEMENT...')
@@ -454,6 +496,45 @@ def extract_musical_intent(prompt: str):
     is_midi_req = any(k in p for k in ['midi', 'basso', 'bass', 'arp', 'arpeggio', 'pad', 'accordi', 'chords', 'melodia', 'melody', 'lead', 'linea di'])
     is_create_req = any(k in p for k in ['crea', 'genera', 'aggiungi', 'scrivi', 'fammi', 'metti', 'create', 'generate', 'add', 'make'])
     return is_midi_req and is_create_req, key, bpm
+
+def infer_and_send_dsp_suggestion(question: str, reply: str):
+    combined = f"{question} {reply}".lower()
+    preset_name = "CLUB MASTER BALANCED"
+    lowcut, punch, width, drive, ceiling, eqmatch = 30.0, 0.42, 1.08, 1.2, -0.3, 60.0
+
+    if any(k in combined for k in ["loud", "forte", "sping", "club", "peak", "hard", "rave", "lufs"]):
+        preset_name = "CLUB PEAK -7 LUFS"
+        lowcut, punch, width, drive, ceiling, eqmatch = 32.0, 0.68, 1.12, 2.8, -0.2, 75.0
+    elif any(k in combined for k in ["sub", "bass", "basso", "fango", "mud", "kick", "cassa", "250hz"]):
+        preset_name = "TIGHT SUB & KICK"
+        lowcut, punch, width, drive, ceiling, eqmatch = 36.0, 0.55, 1.00, 1.5, -0.3, 65.0
+    elif any(k in combined for k in ["wide", "stereo", "spazio", "aria", "air", "atmosfer", "melodic", "pad"]):
+        preset_name = "HYPNOTIC WIDE AIR"
+        lowcut, punch, width, drive, ceiling, eqmatch = 28.0, 0.38, 1.28, 1.0, -0.4, 70.0
+    elif any(k in combined for k in ["warm", "caldo", "analog", "satur", "drive", "distor"]):
+        preset_name = "ANALOG WARMTH"
+        lowcut, punch, width, drive, ceiling, eqmatch = 28.0, 0.58, 1.06, 3.4, -0.3, 55.0
+
+    vst_client.send_message('/neural_lab/suggest_dsp', [
+        preset_name, float(lowcut), float(punch), float(width), float(drive), float(ceiling), float(eqmatch)
+    ])
+
+def emit_dsp_suggestion_for_prompt(question: str, reply: str):
+    q = (question + " " + reply).lower()
+    # [label, lowcut_hz, punch_0_1, width_0_2, drive_db, eqmatch_pct, ceiling_db]
+    if any(k in q for k in ['techno', 'rave', 'hard', 'club', 'peak', 'acid', 'cox']):
+        preset = ['CLUB TECHNO PUNCH', 32.0, 0.62, 1.18, 2.4, 65.0, -0.2]
+    elif any(k in q for k in ['deep', 'house', 'warm', 'analog', 'groove', 'soul']):
+        preset = ['DEEP ANALOG WARMTH', 28.0, 0.38, 1.12, 1.8, 50.0, -0.4]
+    elif any(k in q for k in ['wide', 'stereo', 'spazio', 'aria', 'air', 'reverb', 'pad']):
+        preset = ['HYPNOTIC WIDE AIR', 34.0, 0.42, 1.42, 1.0, 55.0, -0.3]
+    elif any(k in q for k in ['sub', 'basso', 'bass', 'kick', 'fango', 'mud', '250', 'low']):
+        preset = ['TIGHT SUB & KICK', 38.0, 0.54, 1.02, 1.2, 60.0, -0.3]
+    elif any(k in q for k in ['master', 'lufs', 'volume', 'loud', 'limiter', 'final']):
+        preset = ['PRO CLUB MASTER', 30.0, 0.58, 1.15, 3.0, 75.0, -0.1]
+    else:
+        preset = ['BALANCED STUDIO MIX', 30.0, 0.45, 1.10, 1.5, 55.0, -0.3]
+    vst_client.send_message('/neural_lab/dsp_suggestion', preset)
 
 def query_studio_advisor(question: str) -> str:
     sys_prompt = (
@@ -536,12 +617,16 @@ def handle_ask_chat(address, user_text):
                 ableton_client.send_message('/live/clip/fire', [next_track_idx, 0])
 
                 active_session_state['stems'].append({'track_idx': next_track_idx, 'role': role_name, 'is_midi': True})
-                vst_client.send_message('/neural_lab/stem_selected', [next_track_idx, role_name, f"{role_name.replace(' ', '_')}.mid", 0.99])
+                m_name = f"{role_name.replace(' ', '_')}.mid"
+                m_path = export_midi_to_temp_file(m_name, notes)
+                vst_client.send_message('/neural_lab/stem_selected', [next_track_idx, role_name, m_name, 0.99, m_path])
                 send_status(f'MIDI CREATED: {role_name}')
                 send_chat(f'Fatto! Traccia MIDI "{role_name}" creata e avviata su Ableton.')
             else:
                 send_status('AI COPILOT: THINKING...')
                 reply = query_studio_advisor(text)
+                emit_dsp_suggestion_for_prompt(text, reply)
+                infer_and_send_dsp_suggestion(text, reply)
                 send_status('NEURAL-LAB ENGINE: ONLINE')
                 send_chat(reply)
         except Exception as e:
@@ -581,3 +666,5 @@ if __name__ == '__main__':
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
+
