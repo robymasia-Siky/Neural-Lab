@@ -8,6 +8,8 @@ import subprocess
 import threading
 import traceback
 from skill_router import NeuralSkillRouter
+from taste_memory import StudioTasteMemory
+taste_memory = StudioTasteMemory(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'memory', 'engineer_log.jsonl'))
 skill_router = NeuralSkillRouter(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'skills'))
 import struct, tempfile
 
@@ -460,6 +462,7 @@ def handle_plugin_command(address, mode, prompt_text, ref_path=''):
                     build_full_club_arrangement(key, bpm)
 
             dsp_params = mix_engine.compute_dsp_profile(genre, target_lufs, float(mix_target.get('punch', 0.5)), selected_paths)
+            taste_memory.record_decision(genre, ref_path, {'lowcut': dsp_params[0], 'punch': dsp_params[1], 'width': dsp_params[2], 'drive': dsp_params[3], 'ceiling': dsp_params[4]}, 'auto_master')
             vst_client.send_message('/neural_lab/set_dsp', [dsp_params['lowcut'], dsp_params['punch'], dsp_params['width'], dsp_params['drive'], dsp_params['ceiling']])
             send_status(f'ACTIVE: {mode.upper()} ({key} @ {int(bpm)} BPM)')
 
@@ -540,7 +543,7 @@ def emit_dsp_suggestion_for_prompt(question: str, reply: str):
 
 def query_studio_advisor(question: str, telemetry_str: str = '') -> str:
     active_skill = skill_router.route(question, prefer_mcp=False)
-    skill_context = active_skill['body'] if active_skill else ""
+    skill_context = (active_skill['body'] if active_skill else "") + ("\n" + taste_memory.get_recent_taste_summary() if taste_memory.get_recent_taste_summary() else "")
     if active_skill and active_skill.get('dsp_preset'):
         vst_client.send_message('/neural_lab/suggest_dsp', active_skill['dsp_preset'])
     sys_prompt = (
@@ -674,6 +677,7 @@ if __name__ == '__main__':
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
 
 
 
