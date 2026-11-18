@@ -202,8 +202,19 @@ void NeuralLabAudioProcessor::sendChatQuestion(const juce::String& question) {
     chatHistory.push_back({ "YOU: " + trimmed, false });
     if (chatHistory.size() > 40) chatHistory.erase(chatHistory.begin());
     chatDirty = true;
+    juce::String telemetry = neuralDSP.getTelemetrySummary(
+        apvts.getRawParameterValue("drive")->load(),
+        apvts.getRawParameterValue("lowcut")->load(),
+        apvts.getRawParameterValue("punch")->load(),
+        apvts.getRawParameterValue("width")->load(),
+        apvts.getRawParameterValue("eqmatch")->load(),
+        apvts.getRawParameterValue("ceiling")->load(),
+        hasReferenceCurve,
+        referenceTrackName
+    );
     juce::OSCMessage msg("/neural_lab/ask");
     msg.addString(trimmed);
+    msg.addString(telemetry);
     oscSender.send(msg);
 }
 void NeuralLabAudioProcessor::applySuggestedDspPreset() {
@@ -302,6 +313,7 @@ void NeuralLabAudioProcessor::setStateInformation(const void* data, int sizeInBy
 
 juce::AudioProcessorEditor* NeuralLabAudioProcessor::createEditor() { return new NeuralLabAudioProcessorEditor(*this); }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NeuralLabAudioProcessor(); }
+
 
 
 

@@ -538,7 +538,7 @@ def emit_dsp_suggestion_for_prompt(question: str, reply: str):
         preset = ['BALANCED STUDIO MIX', 30.0, 0.45, 1.10, 1.5, 55.0, -0.3]
     vst_client.send_message('/neural_lab/dsp_suggestion', preset)
 
-def query_studio_advisor(question: str) -> str:
+def query_studio_advisor(question: str, telemetry_str: str = '') -> str:
     active_skill = skill_router.route(question, prefer_mcp=False)
     skill_context = active_skill['body'] if active_skill else ""
     if active_skill and active_skill.get('dsp_preset'):
@@ -546,7 +546,7 @@ def query_studio_advisor(question: str) -> str:
     sys_prompt = (
         "Sei NEURAL LAB Copilot, un ingegnere del suono senior. "
         "Applica rigorosamente questa Skill tecnica:\n" + skill_context + "\n"
-        "Rispondi in italiano in massimo 2 frasi brevi, concrete e pratiche (max 165 caratteri totali), senza JSON."
+        (f"\nTELEMETRIA AUDIO REALE DAL PLUGIN:\n{telemetry_str}\n" if telemetry_str else "") + "Usa i dati reali della telemetria (LUFS, GR, bande, DSP attuali) se presenti. Rispondi in italiano in massimo 2 frasi brevi, concrete e pratiche (max 180 caratteri totali), senza JSON."
     )
     payload = json.dumps({
         'model': CUSTOM_MODEL_NAME,
@@ -577,10 +577,11 @@ def handle_set_mcp_enabled(address, enabled_flag):
         send_status('MCP AGENT: ACTIVE' if state else 'MCP AGENT: DISABLED')
         send_chat('Ableton MCP + Qwen Coder attivato e caricato in VRAM.' if state else 'Ableton MCP disattivato (VRAM liberata).')
     threading.Thread(target=worker, daemon=True).start()
-def handle_ask_chat(address, user_text):
+def handle_ask_chat(address, *args):
     def worker():
         try:
-            text = str(user_text).strip()
+            text = str(args[0]).strip() if len(args) >= 1 else ''
+            telemetry_str = str(args[1]).strip() if len(args) >= 2 else ''
             if not text:
                 return
             is_midi, parsed_key, parsed_bpm = extract_musical_intent(text)
@@ -591,7 +592,7 @@ def handle_ask_chat(address, user_text):
                             'cue', 'marker', 'loop', 'clip', 'device', 'carica', 'load', 'modifica', 'umanizza', 'hardware', 'cc', 'program', 'arm', 'timeline', 'view', 'cursore', 'scala', 'accordi', 'pattern']
             if is_mcp_enabled() and any(k in text.lower() for k in mcp_keywords):
                 send_status('MCP AGENT: ANALYZING...')
-                ctx = f"Key={active_session_state.get('key', 'Fm')}, BPM={active_session_state.get('bpm', 126)}"
+                ctx = f"Key={active_session_state.get('key', 'Fm')}, BPM={active_session_state.get('bpm', 126)} | {telemetry_str}"
                 reply = run_ableton_mcp_agent(text, session_context=ctx, status_callback=send_status)
                 send_chat(reply)
                 send_status('NEURAL-LAB ENGINE: ONLINE')
@@ -631,7 +632,7 @@ def handle_ask_chat(address, user_text):
                 send_chat(f'Fatto! Traccia MIDI "{role_name}" creata e avviata su Ableton.')
             else:
                 send_status('AI COPILOT: THINKING...')
-                reply = query_studio_advisor(text)
+                reply = query_studio_advisor(text, telemetry_str)
                 emit_dsp_suggestion_for_prompt(text, reply)
                 infer_and_send_dsp_suggestion(text, reply)
                 send_status('NEURAL-LAB ENGINE: ONLINE')
@@ -673,6 +674,7 @@ if __name__ == '__main__':
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
 
 
 

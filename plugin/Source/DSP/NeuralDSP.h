@@ -27,6 +27,14 @@ public:
         sideHighPassFilter.setType(juce::dsp::StateVariableTPTFilterType::highpass);
         sideHighPassFilter.setCutoffFrequency(120.0f);
         sideHighPassFilter.reset();
+        constexpr float aFreqs[numEqBands] = { 45.0f, 110.0f, 260.0f, 620.0f, 1500.0f, 3600.0f, 8000.0f, 14500.0f };
+        for (int b = 0; b < numEqBands; ++b) {
+            analyzerFilters[static_cast<size_t>(b)].prepare(monoSpec);
+            *analyzerFilters[static_cast<size_t>(b)].coefficients = *juce::dsp::IIR::Coefficients<float>::makeBandPass(spec.sampleRate, aFreqs[b], 1.4f);
+            analyzerFilters[static_cast<size_t>(b)].reset();
+            bandEnvState[static_cast<size_t>(b)] = 0.0f;
+            liveBandDb[static_cast<size_t>(b)].store(-60.0f);
+        }
 
         for (int b = 0; b < numEqBands; ++b) {
             matchEqBands[b].prepare(spec);
@@ -185,16 +193,64 @@ public:
         }
         currentGainReductionDb.store(juce::jlimit(0.0f, 24.0f, grDb));
 
-        // 8. Feed FFT
+                // 8. Feed FFT & 8-Band Real-Time Telemetry Analyzer
         const auto* monoRead = buffer.getReadPointer(0);
         for (int i = 0; i < numSamples; ++i) {
-            pushNextSampleIntoFifo(monoRead[i]);
+            float s = monoRead[i];
+            pushNextSampleIntoFifo(s);
+            if ((i & 3) == 0) { // Decimazione 4x per zero impatto CPU
+                for (int b = 0; b < numEqBands; ++b) {
+                    float bp = analyzerFilters[static_cast<size_t>(b)].processSample(s);
+                    float sq = bp * bp;
+                    bandEnvState[static_cast<size_t>(b)] = bandEnvState[static_cast<size_t>(b)] * 0.985f + sq * 0.015f;
+                }
+            }
+        }
+        for (int b = 0; b < numEqBands; ++b) {
+            float rmsB = std::sqrt(juce::jmax(1e-12f, bandEnvState[static_cast<size_t>(b)]));
+            liveBandDb[static_cast<size_t>(b)].store(juce::jlimit(-60.0f, 0.0f, juce::Decibels::gainToDecibels(rmsB)));
         }
     }
 
     float getRMSLevel() const { return currentRms.load(); }
     float getLUFS() const { return currentLufs.load(); }
     float getGainReductionDb() const { return currentGainReductionDb.load(); }
+    juce::String getTelemetrySummary(float driveDb, float lowCutHz, float punchPct, float widthPct, float matchPct, float ceilingDb, bool hasRef, const juce::String& refName) const {
+        float lufs = currentLufs.load();
+        float gr   = currentGainReductionDb.load();
+        juce::String lufsStr = (lufs <= -58.0f) ? "-INF (Silence/Idle)" : (juce::String(lufs, 1) + " LUFS");
+
+        juce::String out;
+        out << "LIVE_AUDIO: " << lufsStr
+            << " | Limiter_GR=" << juce::String(gr, 1) << "dB"
+            << " | DSP[Drive=" << juce::String(driveDb, 1) << "dB"
+            << ", SubCut=" << juce::String(static_cast<int>(lowCutHz)) << "Hz"
+            << ", Punch=" << juce::String(static_cast<int>(punchPct * 100.0f)) << "%"
+            << ", Width=" << juce::String(static_cast<int>(widthPct * 100.0f)) << "%"
+            << ", EQMatch=" << juce::String(static_cast<int>(matchPct)) << "%"
+            << ", Ceiling=" << juce::String(ceilingDb, 1) << "dB]";
+
+        if (lufs > -55.0f) {
+            constexpr const char* bandNames[numEqBands] = { "Sub45Hz", "Bass110Hz", "LowMid260Hz", "Mid620Hz", "UpMid1.5k", "Pres3.6k", "Air8k", "Bril14k" };
+            out << " | BandLevels[";
+            for (int b = 0; b < numEqBands; ++b) {
+                float liveDb = liveBandDb[static_cast<size_t>(b)].load();
+                out << bandNames[b] << "=" << juce::String(liveDb, 1) << "dB";
+                if (hasRef) {
+                    float refTargetDelta = targetBandGainsDb[static_cast<size_t>(b)].load();
+                    // Se targetBandGainsDb e' negativo significa che il live e' piu' alto della reference
+                    float diffVsRef = -refTargetDelta;
+                    out << "(vsRef:" << (diffVsRef >= 0.0f ? "+" : "") << juce::String(diffVsRef, 1) << "dB)";
+                }
+                if (b < numEqBands - 1) out << ", ";
+            }
+            out << "]";
+        }
+        if (hasRef && refName.isNotEmpty()) {
+            out << " | RefTrack=" << refName;
+        }
+        return out;
+    }
 
     bool getNextFFTBlock(std::array<float, fftSize / 2>& dest) {
         if (!nextFFTBlockReady.load()) return false;
@@ -252,6 +308,9 @@ private:
     std::atomic<bool> hasReferenceData { false };
     std::atomic<bool> curveDirty { false };
     std::array<std::atomic<float>, numEqBands> targetBandGainsDb {};
+    std::array<std::atomic<float>, numEqBands> liveBandDb {};
+    std::array<float, numEqBands> bandEnvState {};
+    std::array<juce::dsp::IIR::Filter<float>, numEqBands> analyzerFilters;
 
     std::atomic<float> currentRms { 0.0f };
     std::atomic<float> currentLufs { -60.0f };
@@ -273,3 +332,4 @@ private:
     int fifoIndex = 0;
     std::atomic<bool> nextFFTBlockReady { false };
 };
+
