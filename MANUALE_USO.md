@@ -1,34 +1,30 @@
-﻿<p align='center'><img src='assets/neural_lab_logo.svg' width='840'/></p>
+# NEURAL-LAB — Manuale d'Uso Completo (Edizione 2026)
 
-# Manuale d'Uso Ufficiale — NEURAL-LAB
+## 1. Installazione e Primo Avvio
+1. Copia `NAURAL LAB.vst3`in `C:\Program Files\Common Files\VST3\` eh avvia la scansione plugin nella DAW.
+2. Apri NEURAL LAB: il server Python (`ai_engine/server.py`) si avvia automaticamente in background fino allo stato `NEURAL-LAB ENGINE: ONLINE`.
+3. Clicca `+ FOLDER` per indicizzare le tue cartelle sample locali tramite CLAP.
 
-**Ideatore del Progetto:** **Robymasia-Siky**
+## 2. Mastering & Dynamic DOP
+- **INPUT DRIVE (-12 / +12 dB):** Guadagno verso saturazione e compressione.
+- **SUB CLEAN (20-300 Hz):** Filtro passa-alto lineare.
+- **NEURAL PUNCH (0-100%):** Compressione dinamica adattiva + saturazione armonica 4x oversampled.
+- **STEREO WIDTH (0-200%):** Controllo Mid/Side con Club Mono-Maker (< 120 Hz in mono).
+- **EQ MATCH (0-100%):** Applica l'EQ Match a 8 bande sulla Reference Track e attiva il **Dynamic Spectral De-Mud (210 Hz & 340 Hz)** fino a -4.5 dB.
+- **CEILING (-6.0 / 0.0 dB):** Soglia del True-Peak Limiter 4x oversampled.
+- **Auto-Gain Reference A/B (> REF / || MATCH):** Compensa automaticamente la differenza di volume LUFS tra il tuo mix e la Reference Track.
+- **Metering (LUFS | dBTP | PLR):** Loudness percepito, picco reale inter-sample e dinamica residua.
 
-## 1. Avvio Rapido
-- **Standalone:** Avvia `NEURAL LAB.exe` (il motore Python/Ollama parte in automatico su `ONLINE`).
-- **VST3:** Copia `NEURAL LAB.vst3` in `C:\Program Files\Common Files\VST3\` e caricalo su Ableton Live.
+## 3. Stems AI, Sample Variations (VAR) e Drag & Drop
+- `>`: Ascolta in anteprima lo stem.
+- `LOCK`: Blocca lo stem scielto nelle generazioni successive.
+- `VAR`: Genera 3 varianti pronte per il Drag & Drop: VAR #1 Harmonic Pitch (+5/+7st), VAR #2 Dark Tape Saturation & LP Filter, VAR #3 Transient Punch & Stereo Air (oppure variazioni MIDI in tonalità).
+- `SWAP`: Sostituisce lo stem con l'alternativa successiva.
+- **Drag & Drop:** Trascina lo stem direttamente dal pannello AI STEMS nella timeline di Ableton Live.
 
-## 2. Chat Copilot Scrollabile & Comandi AI
-- **Campo Prompt:** Scrivi richieste musicali, consigli di mixing o comandi per Ableton Live.
-- **GENERATE TRACK / ARRANGE FULL:** Seleziona e combina i migliori sample dalle cartelle indicizzate.
-- **ASK / MIDI:** Risponde alle domande o crea clip MIDI/tracce su Ableton Live.
-- **AUTO MASTER:** Calibra automaticamente il master sulla Reference.
-- **Slider Chat:** Usa la rotellina del mouse o lo slider destro per scorrere tutte le risposte precedenti.
+## 4. Copilot & Memoria di Gusto (Phase 3)
+- Chiedi analisi di mix/mastering al Copilot (`neural-lab-0.5b`) e clicca `APPLY DSP` per applicare i parametri consigliati.
+- Ogni click salva la preferenza in `ai_engine/memory/engineer_log.jsonl`. Usa `python training/distill_memory.py` per aggiungere i tuoi gusti al dataset QLoRA.
 
-## 3. Sample CLAP & Reference A/B (`> REF` / `|| REF`)
-- **+ SAMPLE FOLDER:** Indicizza WAV/AIFF con Audition (`>`), Lock (`L`) e Swap (`S`).
-- **LOAD REFERENCE & > REF:** Traccia la **REF TARGET EQ CURVE** e attiva il pre-ascolto istantaneo A/B.
-
-## 4. Rack DSP
-- **SUB CLEAN (Hz):** Filtro passa-alto (20–250 Hz).
-- **NEURAL PUNCH:** Esaltazione transienti (0–100%).
-- **STEREO WIDTH:** Ampiezza stereo Mid/Side (0–200%).
-- **INPUT DRIVE (dB):** Saturazione armonica (-12 a +12 dB).
-- **EQ MATCH (%):** Adattamento timbrico sulla Reference.
-- **MASTER CEILING (dB):** Limiter brickwall finale con misuratori LUFS e GR.
-
-## 5. Ableton Live MCP (`MCP: ON/OFF`)
-Con `MCP: ON` controlla Ableton Live via AbletonOSC (porta `11000`) in linguaggio naturale.
-
----
-**NEURAL-LAB — Ideato e realizzato da Robymasia-Siky**
+## 5. Controllo Ableton Live via MCP (qwen2.5-coder:3b)
+Attiva `MCP: ON` in alto per comandare Ableton in linguaggio naturale: creazione tracce/clip MIDI, Arrangement View, Macro 1..8, curve Filter Sweep (`exp_up`, `s_curve`), Send A/B e Mute/Solo.
