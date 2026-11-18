@@ -42,6 +42,27 @@ public:
         }
         updateMatchEqCoefficients(true);
 
+        deMudDetectorLow.prepare(monoSpec);
+        *deMudDetectorLow.coefficients = *juce::dsp::IIR::Coefficients<float>::makeBandPass(spec.sampleRate, 210.0f, 2.4f);
+        deMudDetectorLow.reset();
+
+        deMudDetectorHigh.prepare(monoSpec);
+        *deMudDetectorHigh.coefficients = *juce::dsp::IIR::Coefficients<float>::makeBandPass(spec.sampleRate, 340.0f, 2.4f);
+        deMudDetectorHigh.reset();
+
+        dynamicDeMudLow.prepare(spec);
+        *dynamicDeMudLow.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter(spec.sampleRate, 210.0f, 2.2f, 1.0f);
+        dynamicDeMudLow.reset();
+
+        dynamicDeMudHigh.prepare(spec);
+        *dynamicDeMudHigh.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter(spec.sampleRate, 340.0f, 2.2f, 1.0f);
+        dynamicDeMudHigh.reset();
+
+        deMudEnvLow = 0.0f;
+        deMudEnvHigh = 0.0f;
+        deMudWideEnv = 0.0f;
+        smoothedDeMudCutLowDb = 0.0f;
+        smoothedDeMudCutHighDb = 0.0f;
         compressor.prepare(spec);
 
         // 4x Oversampling (2^2 = 4x) con filtri IIR polifase per saturazione armonica e limiting True-Peak senza aliasing
@@ -127,6 +148,48 @@ public:
         // 2. Sub Clean High-Pass
         lowCutFilter.process(context);
 
+        // 2b. Dynamic Spectral De-Mud & Resonance Suppressor (180 - 450 Hz)
+        if (lastMatchPercent > 2.0f && sampleRate > 0.0) {
+            const auto* inMono = buffer.getReadPointer(0);
+            for (int i = 0; i < numSamples; i += 2) {
+                float x = inMono[i];
+                float lowMud = deMudDetectorLow.processSample(x);
+                float highMud = deMudDetectorHigh.processSample(x);
+                deMudEnvLow  = deMudEnvLow  * 0.965f + (lowMud * lowMud)   * 0.035f;
+                deMudEnvHigh = deMudEnvHigh * 0.965f + (highMud * highMud) * 0.035f;
+                deMudWideEnv = deMudWideEnv * 0.975f + (x * x)             * 0.025f;
+            }
+
+            float wideDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1e-12f, deMudWideEnv)));
+            float lowDb  = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1e-12f, deMudEnvLow)));
+            float highDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1e-12f, deMudEnvHigh)));
+
+            // Se la Reference Track indica meno energia sui medio-bassi (260 Hz), abbassa ulteriormente la soglia
+            float refBiasDb = hasReferenceData.load() ? juce::jlimit(-2.0f, 2.5f, -targetBandGainsDb[2].load() * 0.4f) : 0.0f;
+            float excessLowDb  = juce::jmax(0.0f, (lowDb  - (wideDb - 9.5f)) + refBiasDb);
+            float excessHighDb = juce::jmax(0.0f, (highDb - (wideDb - 10.5f)) + refBiasDb);
+
+            float scale = juce::jlimit(0.0f, 1.0f, lastMatchPercent / 100.0f);
+            float targetCutLowDb  = -juce::jlimit(0.0f, 4.5f, excessLowDb  * 0.55f * scale);
+            float targetCutHighDb = -juce::jlimit(0.0f, 4.0f, excessHighDb * 0.50f * scale);
+
+            smoothedDeMudCutLowDb  = smoothedDeMudCutLowDb  * 0.80f + targetCutLowDb  * 0.20f;
+            smoothedDeMudCutHighDb = smoothedDeMudCutHighDb * 0.80f + targetCutHighDb * 0.20f;
+
+            if (smoothedDeMudCutLowDb < -0.08f) {
+                *dynamicDeMudLow.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter(
+                    sampleRate, 210.0f, 2.2f, juce::Decibels::decibelsToGain(smoothedDeMudCutLowDb));
+                dynamicDeMudLow.process(context);
+            }
+            if (smoothedDeMudCutHighDb < -0.08f) {
+                *dynamicDeMudHigh.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter(
+                    sampleRate, 340.0f, 2.2f, juce::Decibels::decibelsToGain(smoothedDeMudCutHighDb));
+                dynamicDeMudHigh.process(context);
+            }
+            currentDeMudReductionDb.store(std::abs(juce::jmin(smoothedDeMudCutLowDb, smoothedDeMudCutHighDb)));
+        } else {
+            currentDeMudReductionDb.store(0.0f);
+        }
         // 3. 8-Band Auto-EQ Matchering
         if (hasReferenceData.load() && lastMatchPercent > 0.5f) {
             for (int b = 0; b < numEqBands; ++b) {
@@ -221,6 +284,7 @@ public:
     float getRMSLevel() const { return currentRms.load(); }
     float getLUFS() const { return currentLufs.load(); }
     float getGainReductionDb() const { return currentGainReductionDb.load(); }
+    float getDynamicDeMudDb() const { return currentDeMudReductionDb.load(); }
     float getTruePeakDb() const { return currentTruePeakDb.load(); }
     float getPlrDb() const {
         float lufs = currentLufs.load();
@@ -235,7 +299,7 @@ public:
 
         juce::String out;
         out << "LIVE_AUDIO: " << lufsStr << " | TruePeak=" << juce::String(getTruePeakDb(), 1) << "dBTP | PLR=" << juce::String(getPlrDb(), 1) << "dB"
-            << " | Limiter_GR=" << juce::String(gr, 1) << "dB"
+            << " | Limiter_GR=" << juce::String(gr, 1) << "dB | DeMudGR=-" << juce::String(getDynamicDeMudDb(), 1) << "dB"
             << " | DSP[Drive=" << juce::String(driveDb, 1) << "dB"
             << ", SubCut=" << juce::String(static_cast<int>(lowCutHz)) << "Hz"
             << ", Punch=" << juce::String(static_cast<int>(punchPct * 100.0f)) << "%"
@@ -329,6 +393,16 @@ private:
     std::atomic<float> currentLufs { -60.0f };
     std::atomic<float> currentGainReductionDb { 0.0f };
     std::atomic<float> currentTruePeakDb { -60.0f };
+    std::atomic<float> currentDeMudReductionDb { 0.0f };
+    juce::dsp::IIR::Filter<float> deMudDetectorLow;
+    juce::dsp::IIR::Filter<float> deMudDetectorHigh;
+    StereoIIR dynamicDeMudLow;
+    StereoIIR dynamicDeMudHigh;
+    float deMudEnvLow = 0.0f;
+    float deMudEnvHigh = 0.0f;
+    float deMudWideEnv = 0.0f;
+    float smoothedDeMudCutLowDb = 0.0f;
+    float smoothedDeMudCutHighDb = 0.0f;
 
     using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>>;
     std::array<StereoIIR, numEqBands> matchEqBands;
@@ -346,5 +420,6 @@ private:
     int fifoIndex = 0;
     std::atomic<bool> nextFFTBlockReady { false };
 };
+
 
 
