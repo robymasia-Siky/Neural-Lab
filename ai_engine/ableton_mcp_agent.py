@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import random
 import socket
@@ -138,6 +138,23 @@ def compose_smart_notes(key: str = "Fm", style: str = "rolling_bass", bars: int 
     return notes
 
 
+def generate_automation_curve_points(start_beat: float, length_beats: float, start_val: float, end_val: float, shape: str = "exp_up", steps: int = 16) -> list:
+    steps = max(4, min(64, int(steps)))
+    pts = []
+    for i in range(steps + 1):
+        u = i / float(steps)
+        if shape == "exp_up":
+            eased = u * u
+        elif shape == "exp_down":
+            eased = 1.0 - (1.0 - u) * (1.0 - u)
+        elif shape == "s_curve":
+            eased = u * u * (3.0 - 2.0 * u)
+        else:
+            eased = u
+        val = max(0.0, min(1.0, start_val + (end_val - start_val) * eased))
+        pts.append({"time": round(start_beat + u * length_beats, 4), "value": round(val, 4)})
+    return pts
+
 def execute_tool(name: str, args: dict) -> str:
     try:
         if name == "get_session_info":
@@ -265,6 +282,51 @@ def execute_tool(name: str, args: dict) -> str:
             })
         elif name == "set_track_volume":
             res = send_mcp_command("set_track_volume", {"track_index": _zb(args.get("track_index", 1)), "volume": float(args.get("volume", 0.85))})
+        elif name == "set_device_macros":
+            t_idx = _zb(args.get("track_index", 1))
+            d_idx = _zb(args.get("device_index", 1))
+            params_map = args.get("parameters", {})
+            results = []
+            for p_name, p_val in params_map.items():
+                r = send_mcp_command("set_device_parameter", {
+                    "track_index": t_idx,
+                    "device_index": d_idx,
+                    "parameter_name": str(p_name),
+                    "value": max(0.0, min(1.0, float(p_val)))
+                })
+                results.append({p_name: r.get("status", "ok")})
+            res = {"status": "success", "updated": results}
+        elif name == "create_filter_sweep_automation":
+            pts = generate_automation_curve_points(
+                start_beat=float(args.get("start_beat", 0.0)),
+                length_beats=float(args.get("length_beats", 16.0)),
+                start_val=float(args.get("start_val", 0.15)),
+                end_val=float(args.get("end_val", 0.95)),
+                shape=str(args.get("shape", "exp_up")),
+                steps=int(args.get("steps", 16))
+            )
+            res = send_mcp_command("set_clip_automation_points", {
+                "track_index": _zb(args.get("track_index", 1)),
+                "clip_index": _zb(args.get("clip_index", 1)),
+                "parameter_name": str(args.get("parameter_name", "Frequency")),
+                "points": pts,
+                "is_arrangement": bool(args.get("is_arrangement", False)),
+                "clear_existing": True
+            })
+        elif name == "set_track_send":
+            res = send_mcp_command("set_track_send", {
+                "track_index": _zb(args.get("track_index", 1)),
+                "send_index": _zb(args.get("send_index", 1)),
+                "value": max(0.0, min(1.0, float(args.get("value", 0.5))))
+            })
+        elif name == "set_track_mute_solo":
+            t_idx = _zb(args.get("track_index", 1))
+            out_r = {}
+            if "mute" in args:
+                out_r["mute"] = send_mcp_command("set_track_mute", {"track_index": t_idx, "mute": bool(args["mute"])})
+            if "solo" in args:
+                out_r["solo"] = send_mcp_command("set_track_solo", {"track_index": t_idx, "solo": bool(args["solo"])})
+            res = {"status": "success", "track": t_idx + 1, "details": out_r}
         elif name == "set_track_panning":
             res = send_mcp_command("set_track_panning", {"track_index": _zb(args.get("track_index", 1)), "panning": float(args.get("panning", 0.0))})
         else:
@@ -302,6 +364,10 @@ ABLETON_TOOLS = [
     {"type": "function", "function": {"name": "get_device_parameters", "description": "List device parameters on a track (1-based).", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "device_index": {"type": "integer"}}, "required": ["track_index", "device_index"]}}},
     {"type": "function", "function": {"name": "set_device_parameter", "description": "Set normalized parameter (0.0-1.0) on a device.", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "device_index": {"type": "integer"}, "parameter_name": {"type": "string"}, "value": {"type": "number"}}, "required": ["track_index", "device_index", "parameter_name", "value"]}}},
     {"type": "function", "function": {"name": "set_track_volume", "description": "Set track volume (0.0-1.0).", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "volume": {"type": "number"}}, "required": ["track_index", "volume"]}}},
+    {"type": "function", "function": {"name": "set_device_macros", "description": "Set multiple synth/effect parameters or Rack Macros (Macro 1..8, Frequency, Resonance, Decay, Dry/Wet) at once with normalized values 0.0-1.0.", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "device_index": {"type": "integer"}, "parameters": {"type": "object", "additionalProperties": {"type": "number"}}}, "required": ["track_index", "device_index", "parameters"]}}},
+    {"type": "function", "function": {"name": "create_filter_sweep_automation", "description": "Generate a smooth musical automation sweep curve (exp_up, exp_down, s_curve, linear) for filter cutoff, macros or volume over N beats.", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "clip_index": {"type": "integer"}, "parameter_name": {"type": "string"}, "start_beat": {"type": "number"}, "length_beats": {"type": "number"}, "start_val": {"type": "number"}, "end_val": {"type": "number"}, "shape": {"type": "string", "enum": ["exp_up", "exp_down", "s_curve", "linear"]}, "is_arrangement": {"type": "boolean"}}, "required": ["track_index", "clip_index", "parameter_name", "length_beats", "start_val", "end_val"]}}},
+    {"type": "function", "function": {"name": "set_track_send", "description": "Set track Send A (1) or Send B (2) level (0.0-1.0) for Reverb/Delay.", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "send_index": {"type": "integer"}, "value": {"type": "number"}}, "required": ["track_index", "send_index", "value"]}}},
+    {"type": "function", "function": {"name": "set_track_mute_solo", "description": "Mute or Solo a track (1-based).", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "mute": {"type": "boolean"}, "solo": {"type": "boolean"}}, "required": ["track_index"]}}},
     {"type": "function", "function": {"name": "set_track_panning", "description": "Set track panning (-1.0 to +1.0).", "parameters": {"type": "object", "properties": {"track_index": {"type": "integer"}, "panning": {"type": "number"}}, "required": ["track_index", "panning"]}}}
 ]
 
