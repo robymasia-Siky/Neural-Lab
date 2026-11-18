@@ -7,6 +7,8 @@ import socket
 import subprocess
 import threading
 import traceback
+from skill_router import NeuralSkillRouter
+skill_router = NeuralSkillRouter(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'skills'))
 import struct, tempfile
 
 def export_midi_to_temp_file(filename, notes, bpm=126):
@@ -537,9 +539,14 @@ def emit_dsp_suggestion_for_prompt(question: str, reply: str):
     vst_client.send_message('/neural_lab/dsp_suggestion', preset)
 
 def query_studio_advisor(question: str) -> str:
+    active_skill = skill_router.route(question, prefer_mcp=False)
+    skill_context = active_skill['body'] if active_skill else ""
+    if active_skill and active_skill.get('dsp_preset'):
+        vst_client.send_message('/neural_lab/suggest_dsp', active_skill['dsp_preset'])
     sys_prompt = (
-        "Sei NEURAL LAB Copilot, un ingegnere del suono e produttore di musica elettronica. "
-        "Rispondi in italiano in massimo 2 frasi brevi, concrete e pratiche (max 140 caratteri totali), senza JSON."
+        "Sei NEURAL LAB Copilot, un ingegnere del suono senior. "
+        "Applica rigorosamente questa Skill tecnica:\n" + skill_context + "\n"
+        "Rispondi in italiano in massimo 2 frasi brevi, concrete e pratiche (max 165 caratteri totali), senza JSON."
     )
     payload = json.dumps({
         'model': CUSTOM_MODEL_NAME,
@@ -666,5 +673,6 @@ if __name__ == '__main__':
     send_status('NEURAL-LAB ENGINE: ONLINE')
     print('NEURAL LAB ENGINE READY ON 127.0.0.1:9001 (MODEL: neural-lab-0.5b)', flush=True)
     server.serve_forever()
+
 
 
